@@ -44,6 +44,14 @@
   },
   "license": "MIT",
   "author": "Proofrail contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/410979729/proofrail-openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/410979729/proofrail-openclaw/issues"
+  },
+  "homepage": "https://github.com/410979729/proofrail-openclaw#readme",
   "keywords": [
     "openclaw",
     "plugin",
