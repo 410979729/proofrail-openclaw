@@ -645,7 +645,7 @@ function isLikelyMutatingExecAtDepth(command: string, depth: number): boolean {
     const gitCleanMutation = isLikelyGitCleanMutation(segment);
     if (typeof gitCleanMutation === "boolean") return gitCleanMutation;
 
-    if (isReadOnlyFsProbe(segment) && !hasShellWriteRedirection(segment) && !hasTeeWrite(segment)) continue;
+    if (isReadOnlyFsProbe(segment)) continue;
 
     if (!isKnownDryRunInfrastructureCommand(segment) && MUTATING_EXEC_PATTERNS.some((pattern) => pattern.test(segment))) return true;
   }
