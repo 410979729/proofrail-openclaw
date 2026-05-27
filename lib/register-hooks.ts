@@ -293,10 +293,12 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const mutatingExec = category === "exec" && isLikelyMutatingExec(command);
     const validatingExec = category === "exec" && !mutatingExec && isLikelyValidationExec(command);
     const toolResultStatus = getToolResultStatus(event.result, errorText);
-    const verificationSucceeded = validatingExec && toolResultStatus === "success";
-    const lowSignal = verificationSucceeded ? false : isLowSignalObservation(toolName, resultText, errorText);
+    const nonMutatingExec = category === "exec" && !mutatingExec;
+    const lowSignal = isLowSignalObservation(toolName, resultText, errorText);
     const lowSignalSignature = normalizeSignalText(resultText).slice(0, 160) || `${toolName}:empty`;
     const evidenceObservation = isEvidenceObservation(category, mutatingExec, lowSignal, errorText);
+    const nonMutatingObservationSucceeded = nonMutatingExec && toolResultStatus === "success" && evidenceObservation;
+    const verificationSucceeded = state.pendingVerification && (validatingExec || nonMutatingObservationSucceeded);
     const touchedPaths = summarizePaths(changedPathHints(toolName, input, command));
     const validationSuggestions = suggestValidations({ toolName, args: input, command, mutatingExec });
 
@@ -347,6 +349,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       mutatingExec,
       validatingExec,
       verificationSucceeded,
+      nonMutatingObservationSucceeded,
       phase: state.phase,
       pendingVerification: state.pendingVerification,
       touchedPaths,

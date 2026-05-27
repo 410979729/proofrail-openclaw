@@ -1,5 +1,18 @@
 import { looksLikePlainTextFailure, parseResultObject } from "./text";
 
+function unwrapResultPayload(result: unknown): Record<string, unknown> | undefined {
+  const payload = parseResultObject(result);
+  if (!payload) return undefined;
+  const details = payload.details;
+  if (details && typeof details === "object" && !Array.isArray(details)) {
+    return {
+      ...payload,
+      ...(details as Record<string, unknown>),
+    };
+  }
+  return payload;
+}
+
 function getFirstNumericField(result: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
     const value = result[key];
@@ -11,7 +24,7 @@ function getFirstNumericField(result: Record<string, unknown>, keys: readonly st
 export function getToolResultStatus(result: unknown, errorText = ""): "success" | "failure" | "unknown" {
   if (typeof errorText === "string" && errorText.trim()) return "failure";
 
-  const payload = parseResultObject(result);
+  const payload = unwrapResultPayload(result);
   if (!payload) {
     if (typeof result === "string" && looksLikePlainTextFailure(result)) return "failure";
     return "unknown";
@@ -20,6 +33,7 @@ export function getToolResultStatus(result: unknown, errorText = ""): "success" 
   const exitCode = getFirstNumericField(payload, ["exitCode", "exit_code", "code", "returnCode", "returncode", "status"]);
   const httpStatus = getFirstNumericField(payload, ["statusCode", "httpStatus", "http_status"]);
 
+  if (typeof payload.status === "string" && payload.status.trim().toLowerCase() === "blocked") return "failure";
   if (typeof payload.signal === "string" && payload.signal.trim()) return "failure";
   if (typeof exitCode === "number" && exitCode !== 0) return "failure";
   if (typeof httpStatus === "number" && httpStatus >= 400) return "failure";

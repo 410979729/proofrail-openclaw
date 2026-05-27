@@ -124,6 +124,7 @@ export const VALIDATION_EXEC_PATTERNS: RegExp[] = [
   /\b(tsc|eslint|ruff|mypy|cargo check|go test)\b/i,
   /\b(systemctl\s+status)\b/i,
   /\b(ss|netstat|lsof)\b/i,
+  /\b(cat|head|tail|grep|egrep|fgrep|awk|sed\s+-n|wc|diff|cmp|stat|file|readlink|realpath|ls|find|tree|journalctl|git\s+diff)\b/i,
 ];
 
 export const VALIDATION_ENDPOINT_HINTS = /\/(health|healthz|ready|status)\b/i;

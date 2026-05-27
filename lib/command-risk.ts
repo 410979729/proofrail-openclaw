@@ -405,13 +405,59 @@ function getDangerousInfrastructureLabel(command: string): string | undefined {
   return undefined;
 }
 
+function normalizeShellPathToken(token: string): string {
+  return token.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function isBenignWriteSink(target: string): boolean {
+  const normalized = normalizeShellPathToken(target);
+  return /^(?:\/dev\/(?:null|stdout|stderr)|\/proc\/self\/fd\/[12])$/i.test(normalized);
+}
+
 function hasShellWriteRedirection(command: string): boolean {
-  // > file, >> file, 1> file, 2> file, &> file. Excludes descriptor dupes like 2>&1.
-  return /(^|[\s;&|])(?:\d?>|>>|&>)(?!&)(?=\s*(?!&?\d\b)\S+)/.test(command);
+  // > file, >> file, 1> file, 2> file, &> file. Ignore descriptor dupes and benign sinks like /dev/null.
+  const redirectionPattern = /(^|[\s;&|])(?:\d*>>?|&>)(?!&)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = redirectionPattern.exec(command)) !== null) {
+    const token = readShellToken(command, match.index + match[0].length);
+    const target = token.value?.trim();
+    if (!target) return true;
+    if (/^&\d+$/.test(target)) continue;
+    if (isBenignWriteSink(target)) continue;
+    return true;
+  }
+
+  return false;
 }
 
 function hasTeeWrite(command: string): boolean {
-  return /(^|[\s;&|])tee\s+(?:-[a-zA-Z]*a[a-zA-Z]*\s+)?(?!-)(?!\/dev\/null\b)[^\s|;&]+/i.test(command);
+  const teePattern = /(^|[\s;&|])tee(?=\s|$)/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = teePattern.exec(command)) !== null) {
+    let index = match.index + match[0].length;
+    while (index < command.length) {
+      const token = readShellToken(command, index);
+      if (!token.value) break;
+      index = token.endIndex;
+      const value = token.value.trim();
+      if (!value) continue;
+      if (value === "|" || value === ";" || value === "&&" || value === "||") break;
+      if (value === "--") continue;
+      if (value.startsWith("-")) continue;
+      if (value === "-") continue;
+      if (isBenignWriteSink(value)) continue;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isReadOnlyFsProbe(command: string): boolean {
+  return /^(?:cat|head|tail|grep|egrep|fgrep|awk|sed\s+-n|wc|diff|cmp|stat|file|readlink|realpath|ls|find|tree|journalctl)(?:\s|$)/i.test(command)
+    || /^git\s+diff(?:\s|$)/i.test(command);
 }
 
 function isLikelyFileWritingExec(command: string): boolean {
@@ -598,6 +644,8 @@ function isLikelyMutatingExecAtDepth(command: string, depth: number): boolean {
 
     const gitCleanMutation = isLikelyGitCleanMutation(segment);
     if (typeof gitCleanMutation === "boolean") return gitCleanMutation;
+
+    if (isReadOnlyFsProbe(segment) && !hasShellWriteRedirection(segment) && !hasTeeWrite(segment)) continue;
 
     if (!isKnownDryRunInfrastructureCommand(segment) && MUTATING_EXEC_PATTERNS.some((pattern) => pattern.test(segment))) return true;
   }

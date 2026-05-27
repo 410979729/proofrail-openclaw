@@ -19,6 +19,7 @@ const jiti = createJiti(projectRoot, { interopDefault: true, moduleCache: false 
 const { registerProofrailHooks } = jiti(path.join(projectRoot, 'lib/register-hooks.ts'));
 const { resolveRuntimeArtifactsDir, defaultAuditLogPath } = jiti(path.join(projectRoot, 'lib/audit.ts'));
 const { getDangerousCommandAction, getLowSignalBlockThreshold, getSummaryThreshold, isDangerousCommand, isLikelyMutatingExec, isLikelyValidationExec } = jiti(path.join(projectRoot, 'lib/tooling.ts'));
+const { getToolResultStatus } = jiti(path.join(projectRoot, 'lib/result-status.ts'));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -124,6 +125,14 @@ function readJsonLines(filePath) {
     ['python - <<PY\nimport shutil; shutil.rmtree("/")\nPY', true, true, false],
     ['node <<JS\nrequire("fs").rmSync("/", {recursive:true, force:true})\nJS', true, true, false],
     ['npm test', false, false, true],
+    ['find /tmp -name openclaw.plugin.json 2>/dev/null', false, false, true],
+    ['grep proofrail /home/a/openclaw-auditor/gateway.log 2>/dev/null | wc -l', false, false, true],
+    ['ls /home/a/openclaw-auditor/extensions/', false, false, true],
+    ['cat /tmp/example.txt', false, false, true],
+    ['curl -fsS --max-time 5 http://127.0.0.1:19001/healthz 2>/dev/null', false, false, true],
+    ['journalctl -u openclaw-gateway3.service --since "5 min ago" --no-pager | tail -5', false, false, true],
+    ['cat /tmp/example.txt > /tmp/out.txt', false, true, false],
+    ['grep proofrail /tmp/audit.log 2>/dev/null | tee /dev/null', false, false, true],
   ];
   for (const [command, dangerous, mutating, validation] of commandRiskCases) {
     assert(isDangerousCommand(command).dangerous === dangerous, `dangerous mismatch for ${command}`);
@@ -193,6 +202,33 @@ function readJsonLines(filePath) {
   ));
   assert(pendingVerificationBlock && pendingVerificationBlock.block === true, 'second mutation should block until verification');
   callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'exec', params: { command: 'pytest -q' }, result: { exitCode: 0, stdout: '' } }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
+  const postValidationMutationAllowed = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_tool_call',
+    { toolName: 'exec', params: { command: 'touch another.txt' } },
+    { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(!postValidationMutationAllowed, 'successful validation should clear pendingVerification');
+
+  callHook(blockEnv.hooks, 'session_start', { resumedFrom: 'smoke' }, { sessionKey: 's5', workspaceDir: blockEnv.workspaceDir });
+  callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'read', params: { path: existingFile }, result: { text: 'file contents here' } }, { sessionKey: 's5', workspaceDir: blockEnv.workspaceDir });
+  callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'edit', params: { path: existingFile }, result: { ok: true } }, { sessionKey: 's5', workspaceDir: blockEnv.workspaceDir });
+  callHook(blockEnv.hooks, 'after_tool_call', {
+    toolName: 'exec',
+    params: { command: 'ls /tmp' },
+    result: { content: [{ type: 'text', text: '/tmp output' }], details: { exitCode: 0, stdout: '/tmp output' } },
+  }, { sessionKey: 's5', workspaceDir: blockEnv.workspaceDir });
+  const postObservationMutationAllowed = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_tool_call',
+    { toolName: 'exec', params: { command: 'touch another-again.txt' } },
+    { sessionKey: 's5', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(!postObservationMutationAllowed, 'successful non-mutating observation should also clear pendingVerification');
+
+  assert(getToolResultStatus({ content: [{ type: 'text', text: 'ok' }], details: { exitCode: 0, stdout: 'ok' } }) === 'success', 'result-status should unwrap details.exitCode');
+  assert(getToolResultStatus({ content: [{ type: 'text', text: 'boom' }], details: { exitCode: 1, stderr: 'boom' } }) === 'failure', 'result-status should unwrap details failure');
+  assert(getToolResultStatus({ content: [{ type: 'text', text: 'blocked by plugin' }], details: { status: 'blocked', reason: 'pending verification' } }) === 'failure', 'blocked tool result should count as failure');
 
   callHook(blockEnv.hooks, 'before_compaction', { messageCount: 30, tokenCount: 1234 }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
   const snapshotPath = path.join(blockEnv.stateDir, 'plugins', 'proofrail', 'sessions', 's4', 'last-compaction-snapshot.json');
