@@ -4,7 +4,7 @@ import { registerProofrailHooks } from "./lib/register-hooks";
 import type { ProofrailApi } from "./lib/types";
 
 export default definePluginEntry({
-  id: "claude-compat",
+  id: "proofrail",
   name: "Proofrail for OpenClaw",
   description: "Execution harness and runtime guardrails for OpenClaw agents with evidence-first changes and verification gates.",
 

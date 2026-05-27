@@ -84,7 +84,7 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
   else if (state.consecutiveLowSignal >= LOW_SIGNAL_BLOCK_THRESHOLD) nextExpected = "change probe strategy";
 
   return {
-    plugin: "claude-compat",
+    plugin: "proofrail",
     phase: state.phase,
     evidenceCount: state.evidenceCount,
     pendingVerification: state.pendingVerification,
@@ -463,4 +463,4 @@ export function registerProofrailHooks(api: ProofrailApi): void {
   log.info(`[proofrail v${PLUGIN_VERSION}] all hooks registered (phase 1-6 + ledger/audit) ✅`);
 }
 
-export const registerClaudeCompatHooks = registerProofrailHooks;
+export const registerProofrailHooksCompat = registerProofrailHooks;

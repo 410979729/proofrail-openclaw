@@ -1,4 +1,4 @@
-.claude-compat/
+.proofrail/
 node_modules/
 dist/
 *.tgz

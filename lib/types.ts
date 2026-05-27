@@ -36,21 +36,21 @@ export interface CompactionSnapshot {
   sessionKey?: string;
 }
 
-export interface ClaudeCompatLogger {
+export interface ProofrailLogger {
   info(message: string): void;
   warn(message: string): void;
 }
 
-export interface ClaudeCompatPluginConfig {
+export interface ProofrailPluginConfig {
   dangerousCommandAction?: DangerousCommandAction;
   summaryThresholdChars?: number;
   lowSignalBlockThreshold?: number;
 }
 
-export interface ClaudeCompatApi {
+export interface ProofrailApi {
   id?: string;
   name?: string;
-  logger: ClaudeCompatLogger;
+  logger: ProofrailLogger;
   rootDir?: string;
   config?: {
     tools?: {
@@ -60,7 +60,7 @@ export interface ClaudeCompatApi {
     };
     [key: string]: unknown;
   };
-  pluginConfig?: ClaudeCompatPluginConfig | Record<string, unknown>;
+  pluginConfig?: ProofrailPluginConfig | Record<string, unknown>;
   runtime?: {
     state?: {
       resolveStateDir(...args: unknown[]): string;
@@ -74,12 +74,12 @@ export interface ClaudeCompatApi {
   };
   on(
     eventName: string,
-    handler: (event: unknown, ctx?: ClaudeCompatContext) => unknown,
+    handler: (event: unknown, ctx?: ProofrailContext) => unknown,
     options?: HookRegistrationOptions,
   ): void;
 }
 
-export interface ClaudeCompatContext {
+export interface ProofrailContext {
   sessionKey?: string;
   sessionId?: string;
   agentId?: string;
@@ -96,7 +96,7 @@ export interface HookRegistrationOptions {
   priority?: number;
 }
 
-export interface ClaudeCompatEvent {
+export interface ProofrailEvent {
   tool?: { name?: string };
   toolName?: string;
   sessionId?: string;
@@ -105,7 +105,7 @@ export interface ClaudeCompatEvent {
   params?: Record<string, unknown>;
   derivedPaths?: readonly string[];
   context?: {
-    pluginConfig?: ClaudeCompatPluginConfig | Record<string, unknown>;
+    pluginConfig?: ProofrailPluginConfig | Record<string, unknown>;
   };
   result?: unknown;
   error?: string;
@@ -122,9 +122,3 @@ export interface ClaudeCompatEvent {
   nextSessionId?: string;
   nextSessionKey?: string;
 }
-
-export type ProofrailLogger = ClaudeCompatLogger;
-export type ProofrailPluginConfig = ClaudeCompatPluginConfig;
-export type ProofrailApi = ClaudeCompatApi;
-export type ProofrailContext = ClaudeCompatContext;
-export type ProofrailEvent = ClaudeCompatEvent;

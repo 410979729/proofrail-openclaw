@@ -30,7 +30,7 @@ function createApi(options = {}) {
   const stateDir = options.stateDir || fs.mkdtempSync(path.join(os.tmpdir(), 'proofrail-state-'));
   const workspaceDir = options.workspaceDir || fs.mkdtempSync(path.join(os.tmpdir(), 'proofrail-ws-'));
   const api = {
-    id: 'claude-compat',
+    id: 'proofrail',
     name: 'Proofrail',
     rootDir: options.rootDir || projectRoot,
     pluginConfig: options.pluginConfig || {},
@@ -89,7 +89,7 @@ function readJsonLines(filePath) {
   registerProofrailHooks(blockEnv.api);
 
   const runtimeArtifactsDir = resolveRuntimeArtifactsDir(blockEnv.api);
-  assert(runtimeArtifactsDir === path.join(blockEnv.stateDir, 'plugins', 'claude-compat'), 'artifacts dir should resolve under state/plugins/claude-compat');
+  assert(runtimeArtifactsDir === path.join(blockEnv.stateDir, 'plugins', 'proofrail'), 'artifacts dir should resolve under state/plugins/proofrail');
   assert(defaultAuditLogPath(blockEnv.api) === path.join(runtimeArtifactsDir, 'audit.jsonl'), 'audit log path should use state dir');
   assert(getDangerousCommandAction(blockEnv.api) === 'block', 'pluginConfig should drive dangerousCommandAction');
   assert(getLowSignalBlockThreshold(blockEnv.api) === 3, 'pluginConfig should drive lowSignalBlockThreshold');
@@ -195,10 +195,10 @@ function readJsonLines(filePath) {
   callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'exec', params: { command: 'pytest -q' }, result: { exitCode: 0, stdout: '' } }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
 
   callHook(blockEnv.hooks, 'before_compaction', { messageCount: 30, tokenCount: 1234 }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
-  const snapshotPath = path.join(blockEnv.stateDir, 'plugins', 'claude-compat', 'sessions', 's4', 'last-compaction-snapshot.json');
+  const snapshotPath = path.join(blockEnv.stateDir, 'plugins', 'proofrail', 'sessions', 's4', 'last-compaction-snapshot.json');
   assert(fs.existsSync(snapshotPath), 'compaction snapshot should be written under state/plugins');
 
-  const auditPath = path.join(blockEnv.stateDir, 'plugins', 'claude-compat', 'audit.jsonl');
+  const auditPath = path.join(blockEnv.stateDir, 'plugins', 'proofrail', 'audit.jsonl');
   const auditRows = readJsonLines(auditPath);
   assert(auditRows.some((row) => row.event === 'session_start'), 'audit log should contain session_start');
   assert(auditRows.some((row) => row.event === 'dangerous_command'), 'audit log should contain dangerous_command');

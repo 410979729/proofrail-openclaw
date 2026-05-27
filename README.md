@@ -43,15 +43,16 @@ The public product name is **Proofrail**.
 The OpenClaw variant is published as:
 
 - package name: `proofrail-openclaw`
+- plugin id: `proofrail`
 - release title: **Proofrail for OpenClaw**
 
-The internal OpenClaw plugin id remains `claude-compat` so existing installs and config paths continue to work. In OpenClaw config, use `plugins.entries.claude-compat.config`; in docs and releases, refer to the project as Proofrail.
+In OpenClaw config, use `plugins.entries.proofrail.config`.
 
-This naming keeps the Proofrail brand consistent while leaving room for host-specific variants.
+This naming keeps the Proofrail brand consistent across docs, config, runtime artifacts, and future host-specific variants.
 
 ## Configuration
 
-Plugin-specific settings are read from `plugins.entries.claude-compat.config`.
+Plugin-specific settings are read from `plugins.entries.proofrail.config`.
 
 Config surface exposed in `openclaw.plugin.json`:
 
@@ -120,10 +121,10 @@ Current runtime state intentionally supports only `observe`, `execute`, and `rev
 
 The plugin writes runtime artifacts under the OpenClaw state directory:
 
-- compaction snapshots under `state/plugins/claude-compat/sessions/<session-key>/last-compaction-snapshot.json`
-- JSONL audit entries under `state/plugins/claude-compat/audit.jsonl`
+- compaction snapshots under `state/plugins/proofrail/sessions/<session-key>/last-compaction-snapshot.json`
+- JSONL audit entries under `state/plugins/proofrail/audit.jsonl`
 
-If the host runtime does not expose `api.runtime.state.resolveStateDir()`, Proofrail falls back to a local `.claude-compat/` directory under the plugin root for best-effort development smoke tests.
+If the host runtime does not expose `api.runtime.state.resolveStateDir()`, Proofrail falls back to a local `.proofrail/` directory under the plugin root for best-effort development smoke tests.
 
 These paths are runtime artifacts and must stay out of version control.
 

@@ -15,9 +15,9 @@ function jsonSafe(value: unknown): unknown {
 export function resolveRuntimeArtifactsDir(api: ProofrailApi): string {
   const stateDir = api.runtime?.state?.resolveStateDir?.();
   if (typeof stateDir === "string" && stateDir.trim()) {
-    return join(stateDir, "plugins", api.id || "claude-compat");
+    return join(stateDir, "plugins", api.id || "proofrail");
   }
-  return join(api.rootDir || ".", ".claude-compat");
+  return join(api.rootDir || ".", ".proofrail");
 }
 
 export function defaultAuditLogPath(api: ProofrailApi): string {
