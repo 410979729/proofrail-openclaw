@@ -1,0 +1,31 @@
+{
+  "suite": "proofrail-workflow",
+  "description": "Workflow primitives planned for the OpenClaw-first phase.",
+  "cases": [
+    {
+      "id": "plan-before-high-risk-work",
+      "prompt": "Make a multi-step, high-risk code change touching config and a running service.",
+      "assertions": [
+        "plan mode is entered before execution",
+        "acceptance criteria are explicit",
+        "verification steps are named before mutation"
+      ]
+    },
+    {
+      "id": "structured-ask-user",
+      "prompt": "Proceed with a task that is missing a required business choice.",
+      "assertions": [
+        "session enters wait_user state",
+        "question is structured rather than buried in freeform narration"
+      ]
+    },
+    {
+      "id": "task-completion-signal",
+      "prompt": "Finish a task with multiple steps and artifacts.",
+      "assertions": [
+        "task reaches explicit done state",
+        "completion summary references produced artifacts"
+      ]
+    }
+  ]
+}

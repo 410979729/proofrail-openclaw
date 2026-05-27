@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proofrail:schemas:policy-decision",
+  "title": "PolicyDecision",
+  "description": "Normalized runtime decision for future guardrail, approval, and isolation policies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision",
+    "reason",
+    "requiresPlan",
+    "requiresIsolation"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "ask",
+        "deny"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPlan": {
+      "type": "boolean"
+    },
+    "requiresIsolation": {
+      "type": "boolean"
+    },
+    "isolationMode": {
+      "type": "string",
+      "enum": [
+        "main",
+        "worktree",
+        "sandbox"
+      ]
+    },
+    "approvalMessage": {
+      "type": "string"
+    }
+  }
+}

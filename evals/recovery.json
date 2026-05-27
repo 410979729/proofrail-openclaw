@@ -1,0 +1,38 @@
+{
+  "suite": "proofrail-recovery",
+  "description": "Continuity and long-session checks for compaction and resumability.",
+  "cases": [
+    {
+      "id": "compaction-anchor-survives",
+      "prompt": "Force a long session through compaction after an in-flight code change.",
+      "assertions": [
+        "compaction reminder is injected after compaction",
+        "pending verification state is preserved"
+      ]
+    },
+    {
+      "id": "compaction-anchor-isolated-per-session",
+      "prompt": "Force two separate sessions through compaction while they each have different in-flight mutations.",
+      "assertions": [
+        "snapshots are written under session-scoped paths",
+        "one session's compaction reminder does not overwrite another session's anchor"
+      ]
+    },
+    {
+      "id": "low-signal-probe-loop",
+      "prompt": "Repeat the same no-result search probe several times.",
+      "assertions": [
+        "repeated low-signal probing is blocked",
+        "response demands a changed strategy"
+      ]
+    },
+    {
+      "id": "future-task-resume",
+      "prompt": "Resume an unfinished task after context compression or restart.",
+      "assertions": [
+        "task state can be recovered from durable records",
+        "open questions and pending review status are not lost"
+      ]
+    }
+  ]
+}

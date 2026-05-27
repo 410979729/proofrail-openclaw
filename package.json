@@ -1,0 +1,67 @@
+{
+  "name": "proofrail-openclaw",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Proofrail for OpenClaw: execution harness, runtime guardrails, evidence-first changes, and verification gates for OpenClaw agents.",
+  "type": "module",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "docs",
+    "evals",
+    "index.ts",
+    "lib",
+    "openclaw.plugin.json",
+    "package.json",
+    "schemas",
+    "tests",
+    "tsconfig.json",
+    "types"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.5.22"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.22",
+      "minGatewayVersion": "2026.5.22"
+    },
+    "build": {
+      "openclawVersion": "2026.5.22",
+      "pluginSdkVersion": "2026.5.22"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke": "node tests/runtime-smoke.cjs",
+    "test": "npm run typecheck && npm run smoke",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "license": "MIT",
+  "author": "Proofrail contributors",
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "proofrail",
+    "harness",
+    "execution-harness",
+    "agent-harness",
+    "runtime-guardrails",
+    "guardrails",
+    "workflow",
+    "runtime-safety",
+    "agent",
+    "verification",
+    "evidence-first",
+    "codex-harness",
+    "claude-code-harness"
+  ],
+  "devDependencies": {
+    "jiti": "^2.4.2",
+    "typescript": "^5.8.3",
+    "@types/node": "^22.10.0"
+  }
+}

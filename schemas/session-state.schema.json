@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:proofrail:schemas:session-state",
+  "title": "SessionState",
+  "description": "Runtime session state for the Proofrail workflow engine. `plan` and `wait_user` are reserved for the next feature phase.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "phase",
+    "evidenceCount",
+    "pendingVerification",
+    "consecutiveLowSignal",
+    "lastUpdatedAt"
+  ],
+  "properties": {
+    "phase": {
+      "type": "string",
+      "enum": [
+        "observe",
+        "plan",
+        "execute",
+        "review",
+        "wait_user"
+      ]
+    },
+    "evidenceCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lastEvidenceLabel": {
+      "type": "string"
+    },
+    "pendingVerification": {
+      "type": "boolean"
+    },
+    "lastMutationLabel": {
+      "type": "string"
+    },
+    "consecutiveLowSignal": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "lastLowSignalSignature": {
+      "type": "string"
+    },
+    "lastLowSignalIntent": {
+      "type": "string"
+    },
+    "lastUpdatedAt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "activeTaskId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "activePlanId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "isolationMode": {
+      "type": "string",
+      "enum": [
+        "main",
+        "worktree",
+        "sandbox"
+      ]
+    }
+  }
+}
