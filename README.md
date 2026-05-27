@@ -1,8 +1,8 @@
 # Proofrail for OpenClaw
 
-Proofrail for OpenClaw is an execution harness and evidence-first runtime guardrail plugin for OpenClaw agents.
+Why can the same model feel like a chat bot in one tool, but act like a disciplined engineering agent in another? Usually the difference is not only the model. It is the execution harness around the model: how it gathers evidence, when it is allowed to mutate files or state, how it verifies changes, and how it handles risky commands.
 
-People sometimes search for this kind of project as a `codex harness`, `Claude Code harness`, `agent harness`, or `execution harness`. Proofrail is that execution layer for OpenClaw: it wraps tool use with evidence gates, post-change verification, and risk controls.
+Proofrail for OpenClaw is that harness. People often search for this category as a `codex harness`, `Claude Code harness`, `agent harness`, or `execution harness`. Proofrail wraps tool use with evidence gates, post-change verification, and risk controls so OpenClaw agents work in a more disciplined, reviewable way.
 
 It focuses on the runtime behaviors that matter in practice:
 
@@ -18,15 +18,13 @@ It focuses on the runtime behaviors that matter in practice:
 
 ## Why Proofrail exists
 
-A stronger engineering agent is not only about the model. It is also about the execution harness around the model: how it observes the environment, how it acts, how it verifies outcomes, and how it recovers from mistakes.
-
-Proofrail adds that harness to OpenClaw. It does not rely on a single prompt. It sits around tool use and enforces a more disciplined workflow:
+Prompt quality matters, but workflow control matters just as much. Proofrail is not a prompt pack. It is a control-and-correction plugin that sits around tool use and enforces a tighter engineering loop:
 
 - no evidence, no mutation
 - after changes, validate before continuing
 - risky actions are blocked or escalated for approval
 
-The goal is simple: less blind mutation, less state drift, and more verifiable work.
+This is what turns “just answer” behavior into “inspect, act, verify, recover” behavior. The goal is simple: less blind mutation, less state drift, and more verifiable work.
 
 ## Release Status
 
