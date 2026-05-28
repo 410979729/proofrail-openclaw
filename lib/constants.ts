@@ -16,7 +16,7 @@ export const DANGEROUS_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 export const PLUGIN_VERSION = "0.0.1";
-export const DEFAULT_DANGEROUS_COMMAND_ACTION = "approve" as const;
+export const DEFAULT_DANGEROUS_COMMAND_ACTION = "block" as const;
 export const MIN_SUMMARY_THRESHOLD_CHARS = 1000;
 export const MAX_SUMMARY_THRESHOLD_CHARS = 50000;
 export const MIN_LOW_SIGNAL_BLOCK_THRESHOLD = 1;

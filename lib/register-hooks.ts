@@ -14,7 +14,7 @@ import {
   pruneSessionStates,
 } from "./session-state";
 import { extractTextFromToolResult, firstStringField, normalizeSignalText } from "./text";
-import { getToolResultStatus } from "./result-status";
+import { getToolResultStatus, isBlockedToolResult } from "./result-status";
 import {
   closeSummary,
   finalReviewChecklist,
@@ -293,6 +293,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const mutatingExec = category === "exec" && isLikelyMutatingExec(command);
     const validatingExec = category === "exec" && !mutatingExec && isLikelyValidationExec(command);
     const toolResultStatus = getToolResultStatus(event.result, errorText);
+    const blockedResult = isBlockedToolResult(event.result);
     const nonMutatingExec = category === "exec" && !mutatingExec;
     const lowSignal = isLowSignalObservation(toolName, resultText, errorText);
     const lowSignalSignature = normalizeSignalText(resultText).slice(0, 160) || `${toolName}:empty`;
@@ -322,14 +323,16 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     }
 
     if (category === "write" || mutatingExec) {
-      state.pendingVerification = true;
-      state.lastMutationLabel = describeMutation(toolName, input);
-      state.mutationCount += 1;
-      state.finalReportRequired = true;
-      appendMutationLabel(state, state.lastMutationLabel);
-      mergeTouchedFiles(state, touchedPaths);
-      mergeValidationSuggestions(state, validationSuggestions);
-      state.phase = "review";
+      if (!blockedResult && toolResultStatus !== "failure") {
+        state.pendingVerification = true;
+        state.lastMutationLabel = describeMutation(toolName, input);
+        state.mutationCount += 1;
+        state.finalReportRequired = true;
+        appendMutationLabel(state, state.lastMutationLabel);
+        mergeTouchedFiles(state, touchedPaths);
+        mergeValidationSuggestions(state, validationSuggestions);
+        state.phase = "review";
+      }
     } else if (state.pendingVerification && verificationSucceeded) {
       state.pendingVerification = false;
       state.lastMutationLabel = undefined;
@@ -346,6 +349,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       category,
       command,
       status: toolResultStatus,
+      blockedResult,
       mutatingExec,
       validatingExec,
       verificationSucceeded,

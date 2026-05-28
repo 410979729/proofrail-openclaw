@@ -22,7 +22,7 @@ Prompt quality matters, but workflow control matters just as much. Proofrail is 
 
 - no evidence, no mutation
 - after changes, validate before continuing
-- risky actions are blocked or escalated for approval
+- risky actions are blocked by default; approval mode is opt-in when the host has a working plugin approval route
 
 This is what turns “just answer” behavior into “inspect, act, verify, recover” behavior. The goal is simple: less blind mutation, less state drift, and more verifiable work.
 
@@ -56,7 +56,7 @@ Plugin-specific settings are read from `plugins.entries.proofrail.config`.
 
 Config surface exposed in `openclaw.plugin.json`:
 
-- `dangerousCommandAction`: `approve` or `block`
+- `dangerousCommandAction`: `block` or `approve` (default: `block`)
 - `summaryThresholdChars`: summarization threshold for oversized tool output
 - `lowSignalBlockThreshold`: repeated low-signal probe threshold
 

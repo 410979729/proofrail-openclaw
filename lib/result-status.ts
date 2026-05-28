@@ -21,6 +21,11 @@ function getFirstNumericField(result: Record<string, unknown>, keys: readonly st
   return undefined;
 }
 
+export function isBlockedToolResult(result: unknown): boolean {
+  const payload = unwrapResultPayload(result);
+  return typeof payload?.status === "string" && payload.status.trim().toLowerCase() === "blocked";
+}
+
 export function getToolResultStatus(result: unknown, errorText = ""): "success" | "failure" | "unknown" {
   if (typeof errorText === "string" && errorText.trim()) return "failure";
 

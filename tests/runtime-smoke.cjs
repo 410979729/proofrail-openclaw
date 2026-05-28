@@ -149,6 +149,9 @@ function readJsonLines(filePath) {
   ));
   assert(dangerousBlock && dangerousBlock.block === true, 'dangerous command should block in block mode');
 
+  const defaultDangerousPolicyEnv = createApi();
+  assert(getDangerousCommandAction(defaultDangerousPolicyEnv.api) === 'block', 'default dangerousCommandAction should be block');
+
   const approveEnv = createApi({ pluginConfig: { dangerousCommandAction: 'approve' } });
   registerProofrailHooks(approveEnv.api);
   callHook(approveEnv.hooks, 'session_start', { resumedFrom: 'smoke' }, { sessionKey: 's2', workspaceDir: approveEnv.workspaceDir });
@@ -229,6 +232,28 @@ function readJsonLines(filePath) {
   assert(getToolResultStatus({ content: [{ type: 'text', text: 'ok' }], details: { exitCode: 0, stdout: 'ok' } }) === 'success', 'result-status should unwrap details.exitCode');
   assert(getToolResultStatus({ content: [{ type: 'text', text: 'boom' }], details: { exitCode: 1, stderr: 'boom' } }) === 'failure', 'result-status should unwrap details failure');
   assert(getToolResultStatus({ content: [{ type: 'text', text: 'blocked by plugin' }], details: { status: 'blocked', reason: 'pending verification' } }) === 'failure', 'blocked tool result should count as failure');
+
+  callHook(blockEnv.hooks, 'session_start', { resumedFrom: 'smoke' }, { sessionKey: 's6', workspaceDir: blockEnv.workspaceDir });
+  callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'read', params: { path: existingFile }, result: { text: 'file contents here' } }, { sessionKey: 's6', workspaceDir: blockEnv.workspaceDir });
+  const blockedEdit = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_tool_call',
+    { toolName: 'edit', params: { path: existingFile } },
+    { sessionKey: 's6', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(!blockedEdit, 'edit after evidence should still be attempted');
+  callHook(blockEnv.hooks, 'after_tool_call', {
+    toolName: 'edit',
+    params: { path: existingFile },
+    result: { content: [{ type: 'text', text: 'blocked by plugin' }], details: { status: 'blocked', reason: 'missing evidence' } },
+  }, { sessionKey: 's6', workspaceDir: blockEnv.workspaceDir });
+  const retryAfterBlockedMutation = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_tool_call',
+    { toolName: 'edit', params: { path: existingFile } },
+    { sessionKey: 's6', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(!retryAfterBlockedMutation, 'blocked mutation must not create pendingVerification');
 
   callHook(blockEnv.hooks, 'before_compaction', { messageCount: 30, tokenCount: 1234 }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
   const snapshotPath = path.join(blockEnv.stateDir, 'plugins', 'proofrail', 'sessions', 's4', 'last-compaction-snapshot.json');
