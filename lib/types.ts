@@ -26,6 +26,8 @@ export interface SessionRuntimeState {
   validationLabels: readonly string[];
   dangerousLabels: readonly string[];
   finalReportRequired: boolean;
+  lastBlockMessage?: string;
+  lastBlockReason?: string;
   lastUpdatedAt: number;
 }
 

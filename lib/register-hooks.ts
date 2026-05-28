@@ -7,11 +7,13 @@ import {
   appendEvidenceLabel,
   appendMutationLabel,
   appendValidationLabel,
+  clearBlockDecision,
   clearValidationSuggestions,
   getSessionState,
   mergeTouchedFiles,
   mergeValidationSuggestions,
   pruneSessionStates,
+  recordBlockDecision,
 } from "./session-state";
 import { extractTextFromToolResult, firstStringField, normalizeSignalText } from "./text";
 import { getToolResultStatus, isBlockedToolResult } from "./result-status";
@@ -104,6 +106,8 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     validationLabels: [...state.validationLabels],
     dangerousLabels: [...state.dangerousLabels],
     finalReportRequired: state.finalReportRequired,
+    lastBlockMessage: state.lastBlockMessage,
+    lastBlockReason: state.lastBlockReason,
     task: taskSnapshot(state),
     nextExpected,
     auditLogPath,
@@ -200,12 +204,16 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         audit.record("dangerous_command", { sessionKey, toolName, command, label: check.label, policy: dangerousPolicy });
         log.warn(`[proofrail/P0] dangerous [${check.label}] policy=${dangerousPolicy}: ${command.slice(0, 120)}`);
         if (dangerousPolicy === "block") {
+          const blockReason = `High-risk command blocked by plugin policy: ${check.label}`;
+          recordBlockDecision(state, blockReason, "dangerous_command");
           return {
             block: true,
-            blockReason: `High-risk command blocked by plugin policy: ${check.label}`,
+            blockReason,
           };
         }
 
+        const blockReason = `High-risk command requires approval before retry: ${check.label}`;
+        recordBlockDecision(state, blockReason, "dangerous_command_approve");
         return {
           requireApproval: {
             title: `⚠️ Dangerous command: ${check.label}`,
@@ -216,29 +224,35 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     }
 
     if (state.pendingVerification && isMutation) {
+      const blockReason = `Validate the most recent mutation first: ${state.lastMutationLabel || "recent mutation"}`;
       log.info(`[proofrail/P6] block mutation before verification: ${toolIntent}`);
+      recordBlockDecision(state, blockReason, "pending_verification");
       audit.record("tool_decision", { sessionKey, toolName, reason: "pending_verification", decision: "block", toolIntent });
       return {
         block: true,
-        blockReason: `Validate the most recent mutation first: ${state.lastMutationLabel || "recent mutation"}`,
+        blockReason,
       };
     }
 
     if (state.evidenceCount === 0 && (mutatingExec || mutationTouchesExistingPath)) {
+      const blockReason = "Read nearby code, config, logs, or tests first. Collect local evidence before mutating existing files or processes.";
       log.info(`[proofrail/P6] block mutation without evidence: ${toolIntent}`);
+      recordBlockDecision(state, blockReason, "missing_evidence");
       audit.record("tool_decision", { sessionKey, toolName, reason: "missing_evidence", decision: "block", toolIntent });
       return {
         block: true,
-        blockReason: "Read nearby code, config, logs, or tests first. Collect local evidence before mutating existing files or processes.",
+        blockReason,
       };
     }
 
     if (state.consecutiveLowSignal >= getLowSignalBlockThreshold(api, event) && state.lastLowSignalIntent === toolIntent) {
+      const blockReason = "Recent tool calls did not produce new facts. Change the path, keywords, log source, host, or validation method before retrying.";
       log.info(`[proofrail/P6] block repeated low-signal probe: ${toolIntent}`);
+      recordBlockDecision(state, blockReason, "low_signal_repeat");
       audit.record("tool_decision", { sessionKey, toolName, reason: "low_signal_repeat", decision: "block", toolIntent });
       return {
         block: true,
-        blockReason: "Recent tool calls did not produce new facts. Change the path, keywords, log source, host, or validation method before retrying.",
+        blockReason,
       };
     }
 
@@ -320,6 +334,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       state.lastEvidenceLabel = describeObservation(toolName, input, derivedPaths);
       appendEvidenceLabel(state, state.lastEvidenceLabel);
       if (!state.pendingVerification) state.phase = "execute";
+      clearBlockDecision(state, ["missing_evidence", "low_signal_repeat"]);
     }
 
     if (category === "write" || mutatingExec) {
@@ -340,6 +355,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       state.lastValidationLabel = describeObservation(toolName, input, derivedPaths);
       appendValidationLabel(state, state.lastValidationLabel);
       clearValidationSuggestions(state);
+      clearBlockDecision(state, ["pending_verification"]);
       state.phase = state.evidenceCount > 0 ? "execute" : "observe";
     }
 
@@ -403,6 +419,17 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     if (state.consecutiveLowSignal >= getLowSignalBlockThreshold(api, event)) {
       extra += `\n\n## [PLUGIN REMINDER] ⚠️ Change the probe now\nThe last ${state.consecutiveLowSignal} tool call(s) produced no new facts. Do not repeat the same command or search layer; switch logs, paths, keywords, host, download source, or upstream docs.`;
+    }
+
+    if (state.lastBlockMessage) {
+      extra += `\n\n## [PLUGIN REMINDER] Last tool call was blocked\n- Block reason: \`${state.lastBlockReason || "blocked"}\`\n- Block message: ${state.lastBlockMessage}\n- Treat the block message as the required next step, not as an obstacle to route around.\n- Do not look for alternate tools, wrapper tools, or equivalent mutations that achieve the same blocked outcome.`;
+      if (state.lastBlockReason === "pending_verification") {
+        extra += "\n- Validate the last mutation before any more changes.";
+      } else if (state.lastBlockReason === "missing_evidence") {
+        extra += "\n- Gather local evidence on the same control path before retrying the mutation.";
+      } else if (state.lastBlockReason === "low_signal_repeat") {
+        extra += "\n- Change probe strategy instead of retrying the same intent through another tool.";
+      }
     }
 
     if (compactionState?.snapshot && compactionState.count > 0) {

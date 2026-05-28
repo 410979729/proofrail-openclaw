@@ -87,3 +87,15 @@ export function mergeValidationSuggestions(state: SessionRuntimeState, suggestio
 export function clearValidationSuggestions(state: SessionRuntimeState): void {
   state.validationSuggestions = [];
 }
+
+export function recordBlockDecision(state: SessionRuntimeState, message: string, reason: string): void {
+  state.lastBlockMessage = message;
+  state.lastBlockReason = reason;
+}
+
+export function clearBlockDecision(state: SessionRuntimeState, reasons?: readonly string[]): void {
+  if (!reasons || reasons.length === 0 || (state.lastBlockReason && reasons.includes(state.lastBlockReason))) {
+    state.lastBlockMessage = undefined;
+    state.lastBlockReason = undefined;
+  }
+}

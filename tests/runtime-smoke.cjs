@@ -186,6 +186,16 @@ function readJsonLines(filePath) {
     { sessionKey: 's3', workspaceDir: blockEnv.workspaceDir },
   ));
   assert(missingEvidenceBlock && missingEvidenceBlock.block === true, 'relative edit to existing file should be blocked before evidence using workspaceDir');
+  const missingEvidencePrompt = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_prompt_build',
+    {},
+    { sessionKey: 's3', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(missingEvidencePrompt && typeof missingEvidencePrompt.appendSystemContext === 'string', 'blocked state should still inject prompt guidance');
+  assert(missingEvidencePrompt.appendSystemContext.includes('Last tool call was blocked'), 'prompt should mention last blocked tool call');
+  assert(missingEvidencePrompt.appendSystemContext.includes('Treat the block message as the required next step'), 'prompt should tell the model to follow the block message');
+  assert(missingEvidencePrompt.appendSystemContext.includes('Do not look for alternate tools'), 'prompt should forbid routing around a block');
 
   callHook(blockEnv.hooks, 'session_start', { resumedFrom: 'smoke' }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
   callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'read', params: { path: existingFile }, result: { text: 'file contents here' } }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
@@ -204,6 +214,13 @@ function readJsonLines(filePath) {
     { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir },
   ));
   assert(pendingVerificationBlock && pendingVerificationBlock.block === true, 'second mutation should block until verification');
+  const pendingVerificationPrompt = firstDecision(callHook(
+    blockEnv.hooks,
+    'before_prompt_build',
+    {},
+    { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir },
+  ));
+  assert(pendingVerificationPrompt.appendSystemContext.includes('Validate the last mutation before any more changes.'), 'prompt should spell out what resolves a pending-verification block');
   callHook(blockEnv.hooks, 'after_tool_call', { toolName: 'exec', params: { command: 'pytest -q' }, result: { exitCode: 0, stdout: '' } }, { sessionKey: 's4', workspaceDir: blockEnv.workspaceDir });
   const postValidationMutationAllowed = firstDecision(callHook(
     blockEnv.hooks,
