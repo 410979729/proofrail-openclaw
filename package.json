@@ -1,12 +1,13 @@
 {
   "name": "proofrail-openclaw",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": false,
   "description": "Proofrail for OpenClaw: execution harness, runtime guardrails, evidence-first changes, and verification gates for OpenClaw agents.",
   "type": "module",
   "files": [
     "LICENSE",
     "README.md",
+    "CHANGELOG.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
     "docs",
@@ -70,8 +71,8 @@
     "claude-code-harness"
   ],
   "devDependencies": {
-    "jiti": "^2.4.2",
-    "typescript": "^5.8.3",
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "jiti": "^2.7.0",
+    "typescript": "^5.8.3"
   }
 }

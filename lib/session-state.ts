@@ -44,6 +44,8 @@ export function getSessionState(states: Map<string, SessionRuntimeState>, sessio
     validationCount: 0,
     dangerousCount: 0,
     touchedFiles: [],
+    evidencePaths: [],
+    evidenceSuggestions: [],
     validationSuggestions: [],
     evidenceLabels: [],
     mutationLabels: [],
@@ -78,6 +80,18 @@ export function appendDangerousLabel(state: SessionRuntimeState, label?: string)
 
 export function mergeTouchedFiles(state: SessionRuntimeState, paths: readonly string[]): void {
   state.touchedFiles = appendUnique(state.touchedFiles, paths, 16);
+}
+
+export function mergeEvidencePaths(state: SessionRuntimeState, paths: readonly string[]): void {
+  state.evidencePaths = appendUnique(state.evidencePaths, paths, 24);
+}
+
+export function mergeEvidenceSuggestions(state: SessionRuntimeState, suggestions: readonly string[]): void {
+  state.evidenceSuggestions = appendUnique(state.evidenceSuggestions, suggestions, 16);
+}
+
+export function clearEvidenceSuggestions(state: SessionRuntimeState): void {
+  state.evidenceSuggestions = [];
 }
 
 export function mergeValidationSuggestions(state: SessionRuntimeState, suggestions: readonly string[]): void {

@@ -1,6 +1,10 @@
 import { getPathHints } from "./path";
 import { compactLabel } from "./text";
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
 const PY_SUFFIXES = new Set([".py"]);
 const JS_SUFFIXES = new Set([".js", ".jsx", ".ts", ".tsx"]);
 const SHELL_SUFFIXES = new Set([".sh", ".bash", ".zsh"]);
@@ -21,6 +25,35 @@ export function changedPathHints(toolName: string, args: Record<string, unknown>
   if (hints.length > 0) return hints;
   if (!command) return [];
   return unique(command.split(/\s+/).map((part) => part.replace(/^['"]|['"]$/g, "")).filter(looksLikePath));
+}
+
+export function suggestEvidence(params: {
+  toolName: string;
+  args: Record<string, unknown>;
+  command?: string;
+  mutatingExec?: boolean;
+}): string[] {
+  const paths = changedPathHints(params.toolName, params.args, params.command || "");
+  const suggestions: string[] = [];
+
+  for (const path of paths.slice(0, 2)) {
+    suggestions.push(`read ${shellQuote(path)}`);
+    suggestions.push(`grep -n ${shellQuote(path.split(/[\\/]/).pop() || path)} ${shellQuote(path)}`);
+    suggestions.push(`ls -l ${shellQuote(path)}`);
+  }
+
+  if (params.toolName === "exec" || params.mutatingExec) {
+    suggestions.push("read nearby config / source / test files on the same control path before retrying the command");
+    suggestions.push("journalctl -u <related service> -n 50 --no-pager");
+    suggestions.push("curl -fsS --max-time 5 http://127.0.0.1:<port>/healthz");
+  }
+
+  if (paths.length === 0) {
+    suggestions.push("read the closest code, config, log, or test file tied to the blocked target");
+    suggestions.push("grep for the target name in the repo root or adjacent directories");
+  }
+
+  return unique(suggestions).slice(0, 8);
 }
 
 export function suggestValidations(params: {

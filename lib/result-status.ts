@@ -1,4 +1,4 @@
-import { looksLikePlainTextFailure, parseResultObject } from "./text";
+import { extractTextFromToolResult, looksLikePlainTextFailure, parseResultObject } from "./text";
 
 function unwrapResultPayload(result: unknown): Record<string, unknown> | undefined {
   const payload = parseResultObject(result);
@@ -29,9 +29,14 @@ export function isBlockedToolResult(result: unknown): boolean {
 export function getToolResultStatus(result: unknown, errorText = ""): "success" | "failure" | "unknown" {
   if (typeof errorText === "string" && errorText.trim()) return "failure";
 
+  if (typeof result === "string") {
+    const text = result.trim();
+    if (!text) return "unknown";
+    return looksLikePlainTextFailure(text) ? "failure" : "success";
+  }
+
   const payload = unwrapResultPayload(result);
   if (!payload) {
-    if (typeof result === "string" && looksLikePlainTextFailure(result)) return "failure";
     return "unknown";
   }
 
@@ -51,6 +56,9 @@ export function getToolResultStatus(result: unknown, errorText = ""): "success" 
   if (typeof payload.success === "boolean" && payload.success) return "success";
   if (typeof payload.ok === "boolean" && payload.ok) return "success";
   if (typeof httpStatus === "number" && httpStatus >= 200 && httpStatus < 400) return "success";
+
+  const extractedText = extractTextFromToolResult(payload);
+  if (extractedText) return looksLikePlainTextFailure(extractedText) ? "failure" : "success";
 
   return "unknown";
 }

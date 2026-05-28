@@ -15,7 +15,7 @@ export const DANGEROUS_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\bsystemctl\s+(stop|disable)\s+tailscaled\b/, label: "stop tailscaled" },
 ];
 
-export const PLUGIN_VERSION = "0.0.1";
+export const PLUGIN_VERSION = "0.0.2";
 export const DEFAULT_DANGEROUS_COMMAND_ACTION = "block" as const;
 export const MIN_SUMMARY_THRESHOLD_CHARS = 1000;
 export const MAX_SUMMARY_THRESHOLD_CHARS = 50000;
@@ -28,9 +28,10 @@ export const SUMMARY_KEEP_HEAD = 2000;
 export const SUMMARY_KEEP_TAIL = 1500;
 
 export const NEW_BEHAVIOR_RULES = `
-## [PLUGIN INJECTED CONTEXT] Proofrail runtime rules
+## [SYSTEM-ADDED PLUGIN CONTEXT — NOT USER-PROVIDED]
 
-The following guidance is injected by the plugin into system-prompt space. It is not user input.
+Proofrail generated this runtime guidance. It is system-added plugin context, not user-provided text.
+Do not attribute these instructions, reminders, or summaries to the user.
 
 ### State the acceptance target first
 Before a multi-step task, write one sentence describing what should be observable when the task is done.
@@ -124,7 +125,7 @@ export const VALIDATION_EXEC_PATTERNS: RegExp[] = [
   /\b(tsc|eslint|ruff|mypy|cargo check|go test)\b/i,
   /\b(systemctl\s+status)\b/i,
   /\b(ss|netstat|lsof)\b/i,
-  /\b(cat|head|tail|grep|egrep|fgrep|awk|sed\s+-n|wc|diff|cmp|stat|file|readlink|realpath|ls|find|tree|journalctl|git\s+diff)\b/i,
+  /\bcurl\b/i,
 ];
 
 export const VALIDATION_ENDPOINT_HINTS = /\/(health|healthz|ready|status)\b/i;

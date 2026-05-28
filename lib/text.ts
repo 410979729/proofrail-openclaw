@@ -8,7 +8,7 @@ export function extractTextFragments(value: unknown, depth = 0): string[] {
   if (typeof value !== "object") return [];
 
   const record = value as Record<string, unknown>;
-  const fields = ["text", "message", "output", "content", "result", "stdout", "stderr", "summary", "title"];
+  const fields = ["text", "message", "output", "content", "result", "stdout", "stderr", "summary", "title", "details"];
   const fragments: string[] = [];
   for (const field of fields) {
     if (field in record) fragments.push(...extractTextFragments(record[field], depth + 1));

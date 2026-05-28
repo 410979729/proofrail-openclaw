@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { isAbsolute, resolve } from "path";
+import { isAbsolute, resolve, sep } from "path";
 
 function uniquePush(out: string[], seen: Set<string>, value: unknown): void {
   if (typeof value !== "string") return;
@@ -46,6 +46,39 @@ export function pathExistsFromHint(pathHint: string, baseDir?: string): boolean 
   if (!pathHint || /^https?:\/\//i.test(pathHint)) return false;
   const resolvedPath = isAbsolute(pathHint) ? pathHint : resolve(baseDir || ".", pathHint);
   return existsSync(resolvedPath);
+}
+
+function resolvePathHint(pathHint: string, baseDir?: string): string | undefined {
+  if (!pathHint || /^https?:\/\//i.test(pathHint)) return undefined;
+  return isAbsolute(pathHint) ? resolve(pathHint) : resolve(baseDir || ".", pathHint);
+}
+
+function pathContains(left: string, right: string): boolean {
+  return left === right || left.startsWith(`${right}${sep}`);
+}
+
+export function readbackPathsValidateTouchedPaths(touchedHints: readonly string[], readbackHints: readonly string[], baseDir?: string): boolean {
+  const touchedPaths = touchedHints
+    .map((pathHint) => resolvePathHint(pathHint, baseDir))
+    .filter((value): value is string => Boolean(value));
+  const readbackPaths = readbackHints
+    .map((pathHint) => resolvePathHint(pathHint, baseDir))
+    .filter((value): value is string => Boolean(value));
+
+  if (touchedPaths.length === 0 || readbackPaths.length === 0) return false;
+  return readbackPaths.some((readbackPath) => touchedPaths.some((touchedPath) => pathContains(readbackPath, touchedPath)));
+}
+
+export function pathHintsOverlap(leftHints: readonly string[], rightHints: readonly string[], baseDir?: string): boolean {
+  const leftPaths = leftHints
+    .map((pathHint) => resolvePathHint(pathHint, baseDir))
+    .filter((value): value is string => Boolean(value));
+  const rightPaths = rightHints
+    .map((pathHint) => resolvePathHint(pathHint, baseDir))
+    .filter((value): value is string => Boolean(value));
+
+  if (leftPaths.length === 0 || rightPaths.length === 0) return false;
+  return leftPaths.some((leftPath) => rightPaths.some((rightPath) => pathContains(leftPath, rightPath) || pathContains(rightPath, leftPath)));
 }
 
 export function mutatesExistingPath(input: Record<string, unknown>, derivedPaths?: readonly string[], baseDir?: string): boolean {

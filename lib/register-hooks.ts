@@ -1,15 +1,18 @@
 import { LOW_SIGNAL_BLOCK_THRESHOLD, MAX_EVIDENCE_COUNT, NEW_BEHAVIOR_RULES, PLUGIN_VERSION } from "./constants";
 import { AuditLogger, defaultAuditLogPath, resolveRuntimeArtifactsDir } from "./audit";
 import { writeCompactionSnapshot } from "./compaction";
-import { mutatesExistingPath } from "./path";
+import { getPathHints, mutatesExistingPath, pathExistsFromHint, pathHintsOverlap, readbackPathsValidateTouchedPaths } from "./path";
 import {
   appendDangerousLabel,
   appendEvidenceLabel,
   appendMutationLabel,
   appendValidationLabel,
   clearBlockDecision,
+  clearEvidenceSuggestions,
   clearValidationSuggestions,
   getSessionState,
+  mergeEvidencePaths,
+  mergeEvidenceSuggestions,
   mergeTouchedFiles,
   mergeValidationSuggestions,
   pruneSessionStates,
@@ -23,7 +26,7 @@ import {
   renderTaskContext,
   taskSnapshot,
 } from "./task-ledger";
-import { changedPathHints, summarizePaths, suggestValidations } from "./validation";
+import { changedPathHints, summarizePaths, suggestEvidence, suggestValidations } from "./validation";
 import {
   buildToolIntentSignature,
   describeMutation,
@@ -79,6 +82,17 @@ function getMutationBaseDir(api: ProofrailApi, ctx?: ProofrailContext): string |
   return undefined;
 }
 
+function hasRelevantEvidence(
+  state: SessionRuntimeState,
+  targetPaths: readonly string[],
+  requirePathOverlap: boolean,
+  baseDir?: string,
+): boolean {
+  if (state.evidenceCount === 0) return false;
+  if (!requirePathOverlap || targetPaths.length === 0) return true;
+  return pathHintsOverlap(state.evidencePaths, targetPaths, baseDir);
+}
+
 function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string): Record<string, unknown> {
   let nextExpected = "observe";
   if (state.pendingVerification) nextExpected = "validation";
@@ -100,6 +114,8 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     lastDangerousLabel: state.lastDangerousLabel,
     lastValidationLabel: state.lastValidationLabel,
     touchedFiles: [...state.touchedFiles],
+    evidencePaths: [...state.evidencePaths],
+    evidenceSuggestions: [...state.evidenceSuggestions],
     validationSuggestions: [...state.validationSuggestions],
     evidenceLabels: [...state.evidenceLabels],
     mutationLabels: [...state.mutationLabels],
@@ -190,8 +206,14 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey);
     const command = getExecCommand(input);
+    const mutationBaseDir = getMutationBaseDir(api, ctx);
     const mutatingExec = category === "exec" && isLikelyMutatingExec(command);
-    const mutationTouchesExistingPath = category === "write" && mutatesExistingPath(input, derivedPaths, getMutationBaseDir(api, ctx));
+    const targetPaths = category === "write"
+      ? getPathHints(input, derivedPaths, { includeCwd: false })
+      : changedPathHints(toolName, input, command);
+    const mutationTouchesExistingPath = (category === "write" && mutatesExistingPath(input, derivedPaths, mutationBaseDir))
+      || (mutatingExec && targetPaths.some((pathHint) => pathExistsFromHint(pathHint, mutationBaseDir)));
+    const relevantEvidence = hasRelevantEvidence(state, targetPaths, mutationTouchesExistingPath, mutationBaseDir);
     const isMutation = category === "write" || mutatingExec;
 
     if (category === "exec" && command) {
@@ -234,11 +256,13 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       };
     }
 
-    if (state.evidenceCount === 0 && (mutatingExec || mutationTouchesExistingPath)) {
-      const blockReason = "Read nearby code, config, logs, or tests first. Collect local evidence before mutating existing files or processes.";
-      log.info(`[proofrail/P6] block mutation without evidence: ${toolIntent}`);
+    if (!relevantEvidence && (mutatingExec || mutationTouchesExistingPath)) {
+      const blockReason = "Read nearby code, config, logs, or tests first. Collect local evidence on the same target before mutating existing files or processes.";
+      const evidenceSuggestions = suggestEvidence({ toolName, args: input, command, mutatingExec });
+      log.info(`[proofrail/P6] block mutation without relevant evidence: ${toolIntent}`);
       recordBlockDecision(state, blockReason, "missing_evidence");
-      audit.record("tool_decision", { sessionKey, toolName, reason: "missing_evidence", decision: "block", toolIntent });
+      mergeEvidenceSuggestions(state, evidenceSuggestions);
+      audit.record("tool_decision", { sessionKey, toolName, reason: "missing_evidence", decision: "block", toolIntent, evidenceSuggestions, targetPaths, evidencePaths: state.evidencePaths });
       return {
         block: true,
         blockReason,
@@ -309,12 +333,23 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const toolResultStatus = getToolResultStatus(event.result, errorText);
     const blockedResult = isBlockedToolResult(event.result);
     const nonMutatingExec = category === "exec" && !mutatingExec;
+    const mutationBaseDir = getMutationBaseDir(api, ctx);
     const lowSignal = isLowSignalObservation(toolName, resultText, errorText);
     const lowSignalSignature = normalizeSignalText(resultText).slice(0, 160) || `${toolName}:empty`;
     const evidenceObservation = isEvidenceObservation(category, mutatingExec, lowSignal, errorText);
-    const nonMutatingObservationSucceeded = nonMutatingExec && toolResultStatus === "success" && evidenceObservation;
-    const verificationSucceeded = state.pendingVerification && (validatingExec || nonMutatingObservationSucceeded);
-    const touchedPaths = summarizePaths(changedPathHints(toolName, input, command));
+    const nonMutatingObservationSucceeded = (category === "read" || nonMutatingExec) && toolResultStatus === "success" && evidenceObservation;
+    const touchedPathHints = changedPathHints(toolName, input, command);
+    const readbackPaths = category === "read"
+      ? getPathHints(input, derivedPaths, { includeCwd: false })
+      : nonMutatingExec
+        ? touchedPathHints
+        : [];
+    const readbackValidationSucceeded = state.pendingVerification
+      && nonMutatingObservationSucceeded
+      && readbackPaths.length > 0
+      && readbackPathsValidateTouchedPaths(state.touchedFiles, readbackPaths, mutationBaseDir);
+    const verificationSucceeded = state.pendingVerification && (validatingExec || readbackValidationSucceeded);
+    const touchedPaths = summarizePaths(touchedPathHints);
     const validationSuggestions = suggestValidations({ toolName, args: input, command, mutatingExec });
 
     if (lowSignal) {
@@ -333,8 +368,10 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       state.evidenceCount = Math.min(state.evidenceCount + 1, MAX_EVIDENCE_COUNT);
       state.lastEvidenceLabel = describeObservation(toolName, input, derivedPaths);
       appendEvidenceLabel(state, state.lastEvidenceLabel);
+      mergeEvidencePaths(state, changedPathHints(toolName, input, command));
       if (!state.pendingVerification) state.phase = "execute";
       clearBlockDecision(state, ["missing_evidence", "low_signal_repeat"]);
+      clearEvidenceSuggestions(state);
     }
 
     if (category === "write" || mutatingExec) {
@@ -344,7 +381,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         state.mutationCount += 1;
         state.finalReportRequired = true;
         appendMutationLabel(state, state.lastMutationLabel);
-        mergeTouchedFiles(state, touchedPaths);
+        mergeTouchedFiles(state, touchedPathHints);
         mergeValidationSuggestions(state, validationSuggestions);
         state.phase = "review";
       }
@@ -387,53 +424,60 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const compactionState = compactionStates.get(sessionKey);
 
     if (state.phase === "observe") {
-      extra += "\n\n## [PLUGIN STATE] Current phase: Observe\nNot enough local evidence has been collected yet. Read code, config, logs, tests, or health probes near the control path before mutating existing files or processes.";
+      extra += "\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Observe\nNot enough local evidence has been collected yet. Read code, config, logs, tests, or health probes near the control path before mutating existing files or processes.";
     } else if (state.phase === "execute") {
-      extra += `\n\n## [PLUGIN STATE] Current phase: Execute\nLocal evidence has been collected${state.lastEvidenceLabel ? ` (latest: ${state.lastEvidenceLabel})` : ""}. Continue with the smallest control-path mutation and do not widen scope without reason.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Execute\nLocal evidence has been collected${state.lastEvidenceLabel ? ` (latest: ${state.lastEvidenceLabel})` : ""}. Continue with the smallest control-path mutation and do not widen scope without reason.`;
     } else if (state.phase === "review") {
-      extra += `\n\n## [PLUGIN STATE] Current phase: Review\nA recent mutation occurred (${state.lastMutationLabel || "recent mutation"}). New writes are blocked until a narrow validation runs first.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Review\nA recent mutation occurred (${state.lastMutationLabel || "recent mutation"}). New writes are blocked until a narrow validation runs first.`;
     }
 
     extra += "\n\n" + renderTaskContext(state);
 
     if (state.pendingVerification) {
-      extra += `\n\n## [PLUGIN REMINDER] ⚠️ Validate before continuing\nA file, config, or process mutation just happened (${state.lastMutationLabel || "recent mutation"}). Run the narrowest useful validation next before adding more changes.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Validate before continuing\nA file, config, or process mutation just happened (${state.lastMutationLabel || "recent mutation"}). Run the narrowest useful validation next before adding more changes.`;
+    }
+
+    if (state.evidenceSuggestions.length > 0) {
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Suggested evidence-gathering steps\n${state.evidenceSuggestions.map((item) => `- ${item}`).join("\n")}`;
     }
 
     if (state.validationSuggestions.length > 0) {
-      extra += `\n\n## [PLUGIN REMINDER] Suggested narrow validations\n${state.validationSuggestions.map((item) => `- ${item}`).join("\n")}`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Suggested narrow validations\n${state.validationSuggestions.map((item) => `- ${item}`).join("\n")}`;
     }
 
     if (state.touchedFiles.length > 0) {
-      extra += `\n\n## [PLUGIN STATE] Touched files/paths in this turn\n${state.touchedFiles.map((item) => `- ${item}`).join("\n")}`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Touched files/paths in this turn\n${state.touchedFiles.map((item) => `- ${item}`).join("\n")}`;
     }
 
     if (state.dangerousCount > 0) {
-      extra += `\n\n## [PLUGIN STATE] ⚠️ Dangerous action audit\n${state.dangerousCount} high-risk command(s) were observed in this turn (latest: ${state.lastDangerousLabel}). If autonomous work continues, validate the impact and explain the risk in the final report.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] ⚠️ Dangerous action audit\n${state.dangerousCount} high-risk command(s) were observed in this turn (latest: ${state.lastDangerousLabel}). If autonomous work continues, validate the impact and explain the risk in the final report.`;
     }
 
     const checklist = finalReviewChecklist(state);
     if (checklist.length > 0) {
-      extra += `\n\n## [PLUGIN REMINDER] Final report requirements / checklist\n${checklist.map((item) => `- ${item}`).join("\n")}`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Final report requirements / checklist\n${checklist.map((item) => `- ${item}`).join("\n")}`;
     }
 
     if (state.consecutiveLowSignal >= getLowSignalBlockThreshold(api, event)) {
-      extra += `\n\n## [PLUGIN REMINDER] ⚠️ Change the probe now\nThe last ${state.consecutiveLowSignal} tool call(s) produced no new facts. Do not repeat the same command or search layer; switch logs, paths, keywords, host, download source, or upstream docs.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Change the probe now\nThe last ${state.consecutiveLowSignal} tool call(s) produced no new facts. Do not repeat the same command or search layer; switch logs, paths, keywords, host, download source, or upstream docs.`;
     }
 
     if (state.lastBlockMessage) {
-      extra += `\n\n## [PLUGIN REMINDER] Last tool call was blocked\n- Block reason: \`${state.lastBlockReason || "blocked"}\`\n- Block message: ${state.lastBlockMessage}\n- Treat the block message as the required next step, not as an obstacle to route around.\n- Do not look for alternate tools, wrapper tools, or equivalent mutations that achieve the same blocked outcome.`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] Last tool call was blocked\n- Block reason: \`${state.lastBlockReason || "blocked"}\`\n- Block message: ${state.lastBlockMessage}\n- Treat the block message as the required next step, not as an obstacle to route around.\n- Do not look for alternate tools, wrapper tools, or equivalent mutations that achieve the same blocked outcome.`;
       if (state.lastBlockReason === "pending_verification") {
         extra += "\n- Validate the last mutation before any more changes.";
       } else if (state.lastBlockReason === "missing_evidence") {
         extra += "\n- Gather local evidence on the same control path before retrying the mutation.";
+        if (state.evidenceSuggestions.length > 0) {
+          extra += `\n- Start with one of these: ${state.evidenceSuggestions.slice(0, 3).join(" | ")}`;
+        }
       } else if (state.lastBlockReason === "low_signal_repeat") {
         extra += "\n- Change probe strategy instead of retrying the same intent through another tool.";
       }
     }
 
     if (compactionState?.snapshot && compactionState.count > 0) {
-      extra += `\n\n## [PLUGIN REMINDER] ⚠️ Compaction reminder\nThe context was just compacted for the ${compactionState.count} time (${compactionState.snapshot.timestamp}). Please keep in mind:\n- do not lose track of the active task\n- continue following all behavior rules\n- if context feels incomplete, proactively confirm with the user`;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Compaction reminder\nThe context was just compacted for the ${compactionState.count} time (${compactionState.snapshot.timestamp}). Please keep in mind:\n- do not lose track of the active task\n- continue following all behavior rules\n- if context feels incomplete, proactively confirm with the user`;
     }
 
     return { appendSystemContext: extra };

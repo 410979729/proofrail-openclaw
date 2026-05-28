@@ -1,8 +1,6 @@
 # Proofrail for OpenClaw
 
-Why can the same model feel like a chat bot in one tool, but act like a disciplined engineering agent in another? Usually the difference is not only the model. It is the execution harness around the model: how it gathers evidence, when it is allowed to mutate files or state, how it verifies changes, and how it handles risky commands.
-
-Proofrail for OpenClaw is that harness. People often search for this category as a `codex harness`, `Claude Code harness`, `agent harness`, or `execution harness`. Proofrail wraps tool use with evidence gates, post-change verification, and risk controls so OpenClaw agents work in a more disciplined, reviewable way.
+An execution harness for OpenClaw agents. Evidence gates, post-change verification, risk controls — making agents work in a disciplined, reviewable way.
 
 It focuses on the runtime behaviors that matter in practice:
 
@@ -28,7 +26,14 @@ This is what turns “just answer” behavior into “inspect, act, verify, reco
 
 ## Release Status
 
-This tree is prepared for the initial public release: `v0.0.1`.
+This tree is prepared for release: `v0.0.2`.
+
+Notable `v0.0.2` scope includes:
+
+- broadened read-result success detection for plain-text and text-bearing object outputs
+- readback of the touched target now clears pending verification instead of deadlocking the session
+- stronger blocked-turn anti-bypass guidance and same-target evidence gating
+- expanded runtime smoke coverage for readback validation regressions
 
 The current scope is intentionally OpenClaw-first:
 
@@ -76,7 +81,7 @@ From a packed tarball:
 
 ```bash
 npm pack
-openclaw plugins install npm-pack:./proofrail-openclaw-0.0.1.tgz
+openclaw plugins install npm-pack:./proofrail-openclaw-0.0.2.tgz
 ```
 
 After install, enable the plugin if needed and restart the serving Gateway before expecting hook behavior to change.
@@ -159,6 +164,8 @@ npm run typecheck
 npm run smoke
 npm pack --dry-run
 ```
+
+Release notes for this tree live in `CHANGELOG.md`.
 
 ## Review Bundle Expectations
 

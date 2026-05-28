@@ -20,6 +20,8 @@ export interface SessionRuntimeState {
   lastDangerousLabel?: string;
   lastValidationLabel?: string;
   touchedFiles: readonly string[];
+  evidencePaths: readonly string[];
+  evidenceSuggestions: readonly string[];
   validationSuggestions: readonly string[];
   evidenceLabels: readonly string[];
   mutationLabels: readonly string[];

@@ -27,13 +27,15 @@ export function taskSnapshot(state: SessionRuntimeState): Record<string, unknown
     validationLabels: [...state.validationLabels],
     dangerousLabels: [...state.dangerousLabels],
     touchedFiles: [...state.touchedFiles],
+    evidencePaths: [...state.evidencePaths],
+    evidenceSuggestions: [...state.evidenceSuggestions],
     validationSuggestions: [...state.validationSuggestions],
   };
 }
 
 export function renderTaskContext(state: SessionRuntimeState): string {
   const lines = [
-    "## [PLUGIN STATE] Task ledger",
+    "## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Task ledger",
     `- Status: ${taskStatus(state)}`,
     `- Evidence / mutations / validations: ${state.evidenceCount}/${state.mutationCount}/${state.validationCount}`,
   ];
@@ -54,7 +56,7 @@ export function renderTaskContext(state: SessionRuntimeState): string {
   } else if (state.mutationCount && state.validationCount) {
     lines.push("- Next: you may continue, but validate immediately after every new mutation.");
   } else if (state.evidenceCount) {
-    lines.push("- Next: make the smallest explainable change, then validate immediately.");
+    lines.push("- Next: make the smallest explainable change on the same path you just inspected, then validate immediately.");
   } else {
     lines.push("- Next: read the code, config, logs, or tests closest to the control path first.");
   }
