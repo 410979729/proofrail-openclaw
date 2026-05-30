@@ -3,7 +3,16 @@ export type ToolCategory = "read" | "write" | "exec" | "search" | "network" | "o
 // Active runtime states in v0.6.x. `plan` and `wait_user` remain reserved in
 // forward-looking schemas until workflow tools are implemented.
 export type SessionPhase = "observe" | "execute" | "review";
-export type DangerousCommandAction = "approve" | "block";
+export type DangerousCommandAction = "approve" | "block" | "warn" | "allow";
+export type ClassifierDecisionName = "allow" | "warn" | "ask_user" | "block";
+export type ClassifierEvidenceGapName =
+  | "none"
+  | "target_state"
+  | "change_readback"
+  | "narrow_validation"
+  | "user_choice"
+  | "strategy_shift"
+  | "unclear";
 
 export interface SessionRuntimeState {
   phase: SessionPhase;
@@ -30,6 +39,11 @@ export interface SessionRuntimeState {
   finalReportRequired: boolean;
   lastBlockMessage?: string;
   lastBlockReason?: string;
+  lastClassifierDecision?: ClassifierDecisionName;
+  lastClassifierReason?: string;
+  lastClassifierEvidenceGap?: ClassifierEvidenceGapName;
+  lastClassifierGuidance: readonly string[];
+  lastClassifierSource?: string;
   lastUpdatedAt: number;
 }
 
@@ -45,10 +59,32 @@ export interface ProofrailLogger {
   warn(message: string): void;
 }
 
+export interface GuardrailClassifierDecision {
+  decision: ClassifierDecisionName;
+  reason: string;
+  evidenceGap: ClassifierEvidenceGapName;
+  guidance: readonly string[];
+  source: string;
+}
+
+export interface GuardrailClassifier {
+  classify(params: {
+    toolName: string;
+    args: Record<string, unknown>;
+    sessionState: SessionRuntimeState;
+    command: string;
+    category: string;
+    isMutation: boolean;
+  }): GuardrailClassifierDecision | null;
+}
+
 export interface ProofrailPluginConfig {
   dangerousCommandAction?: DangerousCommandAction;
   summaryThresholdChars?: number;
   lowSignalBlockThreshold?: number;
+  llmClassifierEnabled?: boolean;
+  llmClassifierProvider?: string;
+  llmClassifierModel?: string;
 }
 
 export interface ProofrailApi {

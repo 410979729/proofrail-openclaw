@@ -55,10 +55,15 @@ export function resolvePluginConfig(api: ProofrailApi, event?: ProofrailEvent): 
   } as ProofrailPluginConfig;
 }
 
-export function getDangerousCommandAction(api: ProofrailApi, event?: ProofrailEvent): "approve" | "block" {
+export function getDangerousCommandAction(
+  api: ProofrailApi,
+  event?: ProofrailEvent,
+): "approve" | "block" | "warn" | "allow" {
   const configured = resolvePluginConfig(api, event).dangerousCommandAction;
-  if (configured === "approve" || configured === "block") return configured;
-  return DEFAULT_DANGEROUS_COMMAND_ACTION;
+  if (configured === "approve" || configured === "block" || configured === "warn" || configured === "allow") {
+    return configured;
+  }
+  return DEFAULT_DANGEROUS_COMMAND_ACTION as "approve" | "block" | "warn" | "allow";
 }
 
 export function getSummaryThreshold(api: ProofrailApi, event?: ProofrailEvent): number {

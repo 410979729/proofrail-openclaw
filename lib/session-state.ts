@@ -52,6 +52,7 @@ export function getSessionState(states: Map<string, SessionRuntimeState>, sessio
     validationLabels: [],
     dangerousLabels: [],
     finalReportRequired: false,
+    lastClassifierGuidance: [],
     lastUpdatedAt: Date.now(),
   };
   states.set(sessionKey, created);
@@ -112,4 +113,27 @@ export function clearBlockDecision(state: SessionRuntimeState, reasons?: readonl
     state.lastBlockMessage = undefined;
     state.lastBlockReason = undefined;
   }
+}
+
+export function recordClassifierDecision(
+  state: SessionRuntimeState,
+  decision: string,
+  reason: string,
+  evidenceGap: string,
+  guidance: readonly string[],
+  source: string,
+): void {
+  state.lastClassifierDecision = decision as SessionRuntimeState["lastClassifierDecision"];
+  state.lastClassifierReason = reason.trim() || undefined;
+  state.lastClassifierEvidenceGap = evidenceGap as SessionRuntimeState["lastClassifierEvidenceGap"];
+  state.lastClassifierGuidance = guidance.filter((item) => String(item).trim()).slice(0, 6);
+  state.lastClassifierSource = source.trim() || undefined;
+}
+
+export function clearClassifierDecision(state: SessionRuntimeState): void {
+  state.lastClassifierDecision = undefined;
+  state.lastClassifierReason = undefined;
+  state.lastClassifierEvidenceGap = undefined;
+  state.lastClassifierGuidance = [];
+  state.lastClassifierSource = undefined;
 }

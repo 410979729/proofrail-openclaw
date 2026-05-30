@@ -8,6 +8,7 @@ import {
   appendMutationLabel,
   appendValidationLabel,
   clearBlockDecision,
+  clearClassifierDecision,
   clearEvidenceSuggestions,
   clearValidationSuggestions,
   getSessionState,
@@ -17,6 +18,7 @@ import {
   mergeValidationSuggestions,
   pruneSessionStates,
   recordBlockDecision,
+  recordClassifierDecision,
 } from "./session-state";
 import { extractTextFromToolResult, firstStringField, normalizeSignalText } from "./text";
 import { getToolResultStatus, isBlockedToolResult } from "./result-status";
@@ -44,7 +46,8 @@ import {
   isLowSignalObservation,
   summarizeLargeOutput,
 } from "./tooling";
-import type { ProofrailApi, ProofrailContext, ProofrailEvent, CompactionSnapshot, SessionRuntimeState } from "./types";
+import type { ProofrailApi, ProofrailContext, ProofrailEvent, CompactionSnapshot, GuardrailClassifier, SessionRuntimeState } from "./types";
+import { normalizeClassifierDecision, RuleBasedGrayAreaClassifier, shouldRunClassifier } from "./classifier";
 
 interface SessionCompactionState {
   count: number;
@@ -124,6 +127,11 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     finalReportRequired: state.finalReportRequired,
     lastBlockMessage: state.lastBlockMessage,
     lastBlockReason: state.lastBlockReason,
+    lastClassifierDecision: state.lastClassifierDecision,
+    lastClassifierReason: state.lastClassifierReason,
+    lastClassifierEvidenceGap: state.lastClassifierEvidenceGap,
+    lastClassifierGuidance: [...state.lastClassifierGuidance],
+    lastClassifierSource: state.lastClassifierSource,
     task: taskSnapshot(state),
     nextExpected,
     auditLogPath,
@@ -225,23 +233,30 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         appendDangerousLabel(state, check.label);
         audit.record("dangerous_command", { sessionKey, toolName, command, label: check.label, policy: dangerousPolicy });
         log.warn(`[proofrail/P0] dangerous [${check.label}] policy=${dangerousPolicy}: ${command.slice(0, 120)}`);
+
         if (dangerousPolicy === "block") {
           const blockReason = `High-risk command blocked by plugin policy: ${check.label}`;
           recordBlockDecision(state, blockReason, "dangerous_command");
+          return { block: true, blockReason };
+        }
+
+        if (dangerousPolicy === "approve") {
+          const blockReason = `High-risk command requires approval before retry: ${check.label}`;
+          recordBlockDecision(state, blockReason, "dangerous_command_approve");
           return {
-            block: true,
-            blockReason,
+            requireApproval: {
+              title: `⚠️ Dangerous command: ${check.label}`,
+              description: `A high-risk command was detected and requires user approval.\nCommand: ${command.slice(0, 200)}`,
+            },
           };
         }
 
-        const blockReason = `High-risk command requires approval before retry: ${check.label}`;
-        recordBlockDecision(state, blockReason, "dangerous_command_approve");
-        return {
-          requireApproval: {
-            title: `⚠️ Dangerous command: ${check.label}`,
-            description: `A high-risk command was detected and requires user approval.\nCommand: ${command.slice(0, 200)}`,
-          },
-        };
+        // warn / allow: autonomous modes — flow through to workflow guardrails.
+        if (dangerousPolicy === "warn") {
+          audit.record("tool_warning", { sessionKey, toolName, warning: `dangerous command allowed with audit if workflow checks pass: ${check.label}` });
+        } else if (dangerousPolicy === "allow") {
+          audit.record("tool_decision", { sessionKey, toolName, decision: { action: "allow" }, reason: "dangerous_command_allow_if_workflow_checks_pass" });
+        }
       }
     }
 
@@ -284,6 +299,55 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       const target = firstStringField(input, ["path", "file", "filePath", "target"]);
       if (target) {
         log.info(`[proofrail/audit] write tool=${toolName} target=${target.slice(0, 100)}`);
+      }
+    }
+
+    // ——— gray-area classifier —————————————————————————————————
+    clearClassifierDecision(state);
+    const classifier = new RuleBasedGrayAreaClassifier();
+    if (shouldRunClassifier({
+      sessionState: state,
+      category,
+      isMutation,
+      mutatingExec,
+      mutationTouchesExistingPath,
+    })) {
+      const decision = normalizeClassifierDecision(
+        classifier.classify({
+          toolName,
+          args: input,
+          sessionState: state,
+          command,
+          category,
+          isMutation,
+        }),
+      );
+      if (decision) {
+        recordClassifierDecision(
+          state,
+          decision.decision,
+          decision.reason,
+          decision.evidenceGap,
+          decision.guidance,
+          decision.source,
+        );
+        audit.record("classifier_decision", {
+          sessionKey,
+          toolName,
+          decision: decision.decision,
+          evidenceGap: decision.evidenceGap,
+          source: decision.source,
+          reason: decision.reason,
+          guidance: [...decision.guidance],
+        });
+        if (decision.decision === "block") {
+          const guidance = decision.guidance.map((item) => `- ${item}`).join("\n");
+          const blockReason = `Blocked by Proofrail [classifier].\nReason: ${decision.reason}\nEvidence gap: ${decision.evidenceGap}${guidance ? `\nRecommended next step(s):\n${guidance}` : ""}`;
+          log.info(`[proofrail/P6] classifier block: ${toolIntent}`);
+          recordBlockDecision(state, blockReason, "llm_classifier");
+          audit.record("tool_decision", { sessionKey, toolName, reason: "llm_classifier", decision: "block", toolIntent });
+          return { block: true, blockReason };
+        }
       }
     }
 
@@ -473,6 +537,13 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         }
       } else if (state.lastBlockReason === "low_signal_repeat") {
         extra += "\n- Change probe strategy instead of retrying the same intent through another tool.";
+      }
+    }
+
+    if (state.lastClassifierDecision && state.lastClassifierDecision !== "allow") {
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Classifier review\n- Decision: \`${state.lastClassifierDecision}\`\n- Evidence gap: \`${state.lastClassifierEvidenceGap || "unclear"}\`\n- Reason: ${state.lastClassifierReason || "No reason provided."}`;
+      if (state.lastClassifierGuidance.length > 0) {
+        extra += `\n- Guidance:\n${state.lastClassifierGuidance.map((item) => `  - ${item}`).join("\n")}`;
       }
     }
 

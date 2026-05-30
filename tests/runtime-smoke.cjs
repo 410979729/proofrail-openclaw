@@ -151,7 +151,7 @@ function readJsonLines(filePath) {
   assert(dangerousBlock && dangerousBlock.block === true, 'dangerous command should block in block mode');
 
   const defaultDangerousPolicyEnv = createApi();
-  assert(getDangerousCommandAction(defaultDangerousPolicyEnv.api) === 'block', 'default dangerousCommandAction should be block');
+  assert(getDangerousCommandAction(defaultDangerousPolicyEnv.api) === "warn", 'default dangerousCommandAction should be warn');
 
   const approveEnv = createApi({ pluginConfig: { dangerousCommandAction: 'approve' } });
   registerProofrailHooks(approveEnv.api);
