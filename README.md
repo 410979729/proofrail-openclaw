@@ -26,14 +26,14 @@ This is what turns “just answer” behavior into “inspect, act, verify, reco
 
 ## Release Status
 
-This tree is prepared for release: `v0.0.2`.
+This tree is prepared for release: `v0.0.3`.
 
-Notable `v0.0.2` scope includes:
+Notable `v0.0.3` scope includes:
 
-- broadened read-result success detection for plain-text and text-bearing object outputs
-- readback of the touched target now clears pending verification instead of deadlocking the session
-- stronger blocked-turn anti-bypass guidance and same-target evidence gating
-- expanded runtime smoke coverage for readback validation regressions
+- gray-area classifier that blocks writes when evidence is still broad
+- `warn` and `allow` autonomous dangerous-command modes (Hermes parity)
+- classifier state tracking and session context injection
+- config schema extended with LLM classifier options
 
 The current scope is intentionally OpenClaw-first:
 
@@ -81,7 +81,7 @@ From a packed tarball:
 
 ```bash
 npm pack
-openclaw plugins install npm-pack:./proofrail-openclaw-0.0.2.tgz
+openclaw plugins install npm-pack:./proofrail-openclaw-0.0.3.tgz
 ```
 
 After install, enable the plugin if needed and restart the serving Gateway before expecting hook behavior to change.
