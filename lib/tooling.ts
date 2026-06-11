@@ -1,5 +1,9 @@
 import {
+  DEFAULT_ADVISORY_INJECTION,
   DEFAULT_DANGEROUS_COMMAND_ACTION,
+  DEFAULT_ENFORCEMENT_MODE,
+  DEFAULT_MUTATION_BATCH_MAX,
+  DEFAULT_VALIDATION_POLICY,
   LOW_SIGNAL_BLOCK_THRESHOLD,
   MAX_LOW_SIGNAL_BLOCK_THRESHOLD,
   MAX_SUMMARY_THRESHOLD_CHARS,
@@ -9,7 +13,7 @@ import {
   SUMMARY_KEEP_TAIL,
   SUMMARY_THRESHOLD_CHARS,
 } from "./constants";
-import type { ProofrailApi, ProofrailEvent, ProofrailPluginConfig } from "./types";
+import type { AdvisoryInjectionMode, EnforcementMode, ProofrailApi, ProofrailEvent, ProofrailPluginConfig, ValidationPolicy } from "./types";
 
 export {
   getExecCommand,
@@ -64,6 +68,31 @@ export function getDangerousCommandAction(
     return configured;
   }
   return DEFAULT_DANGEROUS_COMMAND_ACTION as "approve" | "block" | "warn" | "allow";
+}
+
+export function getEnforcementMode(api: ProofrailApi, event?: ProofrailEvent): EnforcementMode {
+  const configured = resolvePluginConfig(api, event).enforcementMode;
+  if (configured === "advisory" || configured === "strict" || configured === "guarded" || configured === "off") return configured;
+  return DEFAULT_ENFORCEMENT_MODE;
+}
+
+export function getAdvisoryInjection(api: ProofrailApi, event?: ProofrailEvent): AdvisoryInjectionMode {
+  const configured = resolvePluginConfig(api, event).advisoryInjection;
+  if (configured === "compact" || configured === "full" || configured === "off") return configured;
+  return DEFAULT_ADVISORY_INJECTION;
+}
+
+export function getValidationPolicy(api: ProofrailApi, event?: ProofrailEvent): ValidationPolicy {
+  const configured = resolvePluginConfig(api, event).validationPolicy;
+  if (configured === "batch" || configured === "after_each_mutation" || configured === "off") return configured;
+  if (configured === "immediate") return "after_each_mutation";
+  return DEFAULT_VALIDATION_POLICY;
+}
+
+export function getMutationBatchMax(api: ProofrailApi, event?: ProofrailEvent): number {
+  const configured = resolvePluginConfig(api, event).mutationBatchMax;
+  if (typeof configured !== "number" || !Number.isFinite(configured)) return DEFAULT_MUTATION_BATCH_MAX;
+  return Math.max(1, Math.min(20, Math.floor(configured)));
 }
 
 export function getSummaryThreshold(api: ProofrailApi, event?: ProofrailEvent): number {

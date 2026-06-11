@@ -3,6 +3,9 @@ export type ToolCategory = "read" | "write" | "exec" | "search" | "network" | "o
 // Active runtime states in v0.6.x. `plan` and `wait_user` remain reserved in
 // forward-looking schemas until workflow tools are implemented.
 export type SessionPhase = "observe" | "execute" | "review";
+export type EnforcementMode = "advisory" | "strict" | "guarded" | "off";
+export type AdvisoryInjectionMode = "compact" | "full" | "off";
+export type ValidationPolicy = "batch" | "after_each_mutation" | "off";
 export type DangerousCommandAction = "approve" | "block" | "warn" | "allow";
 export type ClassifierDecisionName = "allow" | "warn" | "ask_user" | "block";
 export type ClassifierEvidenceGapName =
@@ -37,6 +40,17 @@ export interface SessionRuntimeState {
   validationLabels: readonly string[];
   dangerousLabels: readonly string[];
   finalReportRequired: boolean;
+  lastAdvisory?: {
+    reason: string;
+    message: string;
+    severity: "info" | "warn" | "risk";
+    target?: string;
+    fastestNextAction?: string;
+    riskIfIgnored?: string;
+    wouldHaveBlockedInStrict: boolean;
+    ignored?: boolean;
+  };
+  unverifiedMutationCount: number;
   lastBlockMessage?: string;
   lastBlockReason?: string;
   lastClassifierDecision?: ClassifierDecisionName;
@@ -79,6 +93,10 @@ export interface GuardrailClassifier {
 }
 
 export interface ProofrailPluginConfig {
+  enforcementMode?: EnforcementMode;
+  advisoryInjection?: AdvisoryInjectionMode;
+  validationPolicy?: ValidationPolicy | "immediate";
+  mutationBatchMax?: number;
   dangerousCommandAction?: DangerousCommandAction;
   summaryThresholdChars?: number;
   lowSignalBlockThreshold?: number;

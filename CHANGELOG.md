@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.0.4
+
+- Port Hermes v0.0.4-v0.0.8 advisory-first behavior to OpenClaw:
+  default workflow risks now record advisories and continue instead of hard-blocking.
+- Add `enforcementMode`, `advisoryInjection`, `validationPolicy`, and
+  `mutationBatchMax` config controls; `strict` preserves the previous hard-block
+  behavior.
+- Add compact advisory prompt injection and expose advisory state through
+  runtime diagnostics.
+- Harden validation target extraction so shell assignments, `/dev/null`
+  redirections, Windows command switches, and `python -c` inline code do not
+  become phantom pending-verification targets.
+
 ## v0.0.3
 
 - Add gray-area classifier (RuleBasedGrayAreaClassifier) — blocks writes when

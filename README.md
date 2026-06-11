@@ -4,8 +4,8 @@ An execution harness for OpenClaw agents. Evidence gates, post-change verificati
 
 It focuses on the runtime behaviors that matter in practice:
 
-- evidence before mutation
-- mutation before verification
+- advisory-first evidence-before-mutation guidance
+- mutation-before-verification tracking
 - repeated low-signal probe blocking
 - dangerous command approval or blocking
 - large output summarization
@@ -18,22 +18,22 @@ It focuses on the runtime behaviors that matter in practice:
 
 Prompt quality matters, but workflow control matters just as much. Proofrail is not a prompt pack. It is a control-and-correction plugin that sits around tool use and enforces a tighter engineering loop:
 
-- no evidence, no mutation
-- after changes, validate before continuing
+- no evidence, no mutation in `strict` mode; actionable advisory in the default mode
+- after changes, validate before continuing, with batch-friendly advisory defaults
 - risky actions are blocked by default; approval mode is opt-in when the host has a working plugin approval route
 
 This is what turns “just answer” behavior into “inspect, act, verify, recover” behavior. The goal is simple: less blind mutation, less state drift, and more verifiable work.
 
 ## Release Status
 
-This tree is prepared for release: `v0.0.3`.
+This tree is prepared for release: `v0.0.4`.
 
-Notable `v0.0.3` scope includes:
+Notable `v0.0.4` scope includes:
 
-- gray-area classifier that blocks writes when evidence is still broad
-- `warn` and `allow` autonomous dangerous-command modes (Hermes parity)
-- classifier state tracking and session context injection
-- config schema extended with LLM classifier options
+- advisory-first workflow risks by default, with `strict` compatibility for the earlier hard-block runtime
+- `enforcementMode`, `advisoryInjection`, `validationPolicy`, and `mutationBatchMax` config controls
+- compact advisory prompt injection and advisory state diagnostics
+- validation target extraction fixes for shell assignments, `/dev/null` redirections, Windows command switches, and `python -c` inline source
 
 The current scope is intentionally OpenClaw-first:
 
@@ -61,7 +61,11 @@ Plugin-specific settings are read from `plugins.entries.proofrail.config`.
 
 Config surface exposed in `openclaw.plugin.json`:
 
-- `dangerousCommandAction`: `block` or `approve` (default: `block`)
+- `enforcementMode`: `advisory`, `strict`, `guarded`, or `off` (default: `advisory`)
+- `advisoryInjection`: `compact`, `full`, or `off` (default: `compact`)
+- `validationPolicy`: `batch`, `after_each_mutation`, `immediate`, or `off` (default: `batch`)
+- `mutationBatchMax`: maximum unverified mutation batch size before advisory severity escalates
+- `dangerousCommandAction`: `approve`, `block`, `warn`, or `allow` (default: `warn`)
 - `summaryThresholdChars`: summarization threshold for oversized tool output
 - `lowSignalBlockThreshold`: repeated low-signal probe threshold
 
@@ -81,7 +85,7 @@ From a packed tarball:
 
 ```bash
 npm pack
-openclaw plugins install npm-pack:./proofrail-openclaw-0.0.3.tgz
+openclaw plugins install npm-pack:./proofrail-openclaw-0.0.4.tgz
 ```
 
 After install, enable the plugin if needed and restart the serving Gateway before expecting hook behavior to change.

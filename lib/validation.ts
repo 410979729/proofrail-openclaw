@@ -11,9 +11,143 @@ const SHELL_SUFFIXES = new Set([".sh", ".bash", ".zsh"]);
 const YAML_SUFFIXES = new Set([".yaml", ".yml"]);
 const JSON_SUFFIXES = new Set([".json"]);
 const DOC_SUFFIXES = new Set([".md", ".rst", ".txt"]);
+const SHELL_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const REDIRECT_PREFIX_RE = /^(?<op>\d*(?:>>?|<<?)|&>|\d*>&)(?<target>.*)$/;
+const PYTHON_EXECUTABLE_RE = /^(?:python(?:\d+(?:\.\d+)?)?|pythonw(?:\d+(?:\.\d+)?)?|pypy(?:\d+(?:\.\d+)?)?)$/i;
+const WINDOWS_STYLE_SWITCH_RE = /^\/[A-Za-z][A-Za-z0-9?]*$/;
+const WINDOWS_SWITCH_COMMANDS = new Set([
+  "cmd",
+  "cmd.exe",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "pwsh.exe",
+  "reg",
+  "reg.exe",
+  "robocopy",
+  "robocopy.exe",
+  "sc",
+  "sc.exe",
+  "schtasks",
+  "schtasks.exe",
+  "taskkill",
+  "taskkill.exe",
+  "tasklist",
+  "tasklist.exe",
+  "wmic",
+  "wmic.exe",
+]);
 
 function looksLikePath(value: string): boolean {
   return Boolean(value) && !value.startsWith("-") && (value.includes("/") || /\.[A-Za-z0-9]+$/.test(value));
+}
+
+function shellSplit(command: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote = "";
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) {
+        quote = "";
+      } else if (char === "\\" && quote === "\"" && index + 1 < command.length) {
+        current += command[index + 1];
+        index += 1;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        out.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (current) out.push(current);
+  return out.length > 0 ? out : command.split(/\s+/).filter(Boolean);
+}
+
+function basename(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, "").split(/[\\/]/).pop()?.toLowerCase() || "";
+}
+
+function isPythonExecutableToken(value: string): boolean {
+  return PYTHON_EXECUTABLE_RE.test(basename(value));
+}
+
+function isWindowsSwitchCommand(value: string): boolean {
+  return WINDOWS_SWITCH_COMMANDS.has(basename(value));
+}
+
+function pathCandidatesFromShellToken(rawValue: string, ignoreWindowsSwitches: boolean): string[] {
+  let value = rawValue.trim().replace(/^['"`.,;(){}[\]]+|['"`.,;(){}[\]]+$/g, "");
+  if (!value || ["|", "||", "&", "&&", ";"].includes(value)) return [];
+  if (/^https?:\/\//i.test(value)) return [];
+  if (value.startsWith("-")) return [];
+  if (ignoreWindowsSwitches && WINDOWS_STYLE_SWITCH_RE.test(value)) return [];
+  if (SHELL_ASSIGNMENT_RE.test(value)) return [];
+  if (value.startsWith("$") || value.startsWith("${")) return [];
+
+  const redirectMatch = REDIRECT_PREFIX_RE.exec(value);
+  if (redirectMatch?.groups) {
+    const target = redirectMatch.groups.target.trim().replace(/^['"]|['"]$/g, "");
+    if (!target || target.startsWith("&") || target.startsWith("$") || target === "/dev/null") return [];
+    value = target;
+  }
+
+  const wrapperMatch = /^(?:PosixPath|WindowsPath|Path)\((['"])(.*?)\1\)$/.exec(value);
+  if (wrapperMatch) value = wrapperMatch[2];
+  if (value === "/dev/null" || value.startsWith("/dev/fd/")) return [];
+  return looksLikePath(value) ? [value] : [];
+}
+
+function commandPathHints(command: string): string[] {
+  const parts = shellSplit(command);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let pythonArgMode = false;
+  let skipNextPythonCode = false;
+  const windowsSwitchMode = parts.length > 0 && isWindowsSwitchCommand(parts[0]);
+
+  for (const rawPart of parts) {
+    if (skipNextPythonCode) {
+      skipNextPythonCode = false;
+      pythonArgMode = false;
+      continue;
+    }
+    if (isPythonExecutableToken(rawPart)) {
+      pythonArgMode = true;
+      continue;
+    }
+    if (pythonArgMode) {
+      if (rawPart === "-c") {
+        skipNextPythonCode = true;
+        continue;
+      }
+      if (rawPart.startsWith("-c") && rawPart.length > 2) {
+        pythonArgMode = false;
+        continue;
+      }
+      if (rawPart.startsWith("-")) continue;
+      pythonArgMode = false;
+    }
+    for (const candidate of pathCandidatesFromShellToken(rawPart, windowsSwitchMode)) {
+      if (!seen.has(candidate)) {
+        seen.add(candidate);
+        out.push(candidate);
+      }
+    }
+  }
+  return out;
 }
 
 function unique(values: readonly string[]): string[] {
@@ -24,7 +158,7 @@ export function changedPathHints(toolName: string, args: Record<string, unknown>
   const hints = getPathHints(args, undefined, { includeCwd: false });
   if (hints.length > 0) return hints;
   if (!command) return [];
-  return unique(command.split(/\s+/).map((part) => part.replace(/^['"]|['"]$/g, "")).filter(looksLikePath));
+  return unique(commandPathHints(command));
 }
 
 export function suggestEvidence(params: {

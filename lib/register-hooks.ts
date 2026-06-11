@@ -7,6 +7,7 @@ import {
   appendEvidenceLabel,
   appendMutationLabel,
   appendValidationLabel,
+  clearAdvisory,
   clearBlockDecision,
   clearClassifierDecision,
   clearEvidenceSuggestions,
@@ -17,6 +18,7 @@ import {
   mergeTouchedFiles,
   mergeValidationSuggestions,
   pruneSessionStates,
+  recordAdvisory,
   recordBlockDecision,
   recordClassifierDecision,
 } from "./session-state";
@@ -35,9 +37,13 @@ import {
   describeObservation,
   getCanonicalToolName,
   getDangerousCommandAction,
+  getAdvisoryInjection,
+  getEnforcementMode,
   getExecCommand,
   getLowSignalBlockThreshold,
+  getMutationBatchMax,
   getSummaryThreshold,
+  getValidationPolicy,
   getToolCategory,
   isDangerousCommand,
   isEvidenceObservation,
@@ -46,7 +52,7 @@ import {
   isLowSignalObservation,
   summarizeLargeOutput,
 } from "./tooling";
-import type { ProofrailApi, ProofrailContext, ProofrailEvent, CompactionSnapshot, GuardrailClassifier, SessionRuntimeState } from "./types";
+import type { EnforcementMode, ProofrailApi, ProofrailContext, ProofrailEvent, CompactionSnapshot, GuardrailClassifier, SessionRuntimeState } from "./types";
 import { normalizeClassifierDecision, RuleBasedGrayAreaClassifier, shouldRunClassifier } from "./classifier";
 
 interface SessionCompactionState {
@@ -125,6 +131,8 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     validationLabels: [...state.validationLabels],
     dangerousLabels: [...state.dangerousLabels],
     finalReportRequired: state.finalReportRequired,
+    lastAdvisory: state.lastAdvisory,
+    unverifiedMutationCount: state.unverifiedMutationCount,
     lastBlockMessage: state.lastBlockMessage,
     lastBlockReason: state.lastBlockReason,
     lastClassifierDecision: state.lastClassifierDecision,
@@ -136,6 +144,58 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     nextExpected,
     auditLogPath,
   };
+}
+
+function workflowRiskBlocks(mode: EnforcementMode): boolean {
+  return mode === "strict";
+}
+
+function workflowRiskDecision(params: {
+  state: SessionRuntimeState;
+  audit: AuditLogger;
+  sessionKey: string;
+  toolName: string;
+  toolIntent: string;
+  reason: string;
+  message: string;
+  mode: EnforcementMode;
+  severity?: "info" | "warn" | "risk";
+  target?: string;
+  fastestNextAction?: string;
+  riskIfIgnored?: string;
+  extra?: Record<string, unknown>;
+}): { block: true; blockReason: string } | undefined {
+  if (params.mode === "off") return undefined;
+  if (workflowRiskBlocks(params.mode)) {
+    recordBlockDecision(params.state, params.message, params.reason);
+    params.audit.record("tool_decision", {
+      sessionKey: params.sessionKey,
+      toolName: params.toolName,
+      reason: params.reason,
+      decision: "block",
+      toolIntent: params.toolIntent,
+      ...(params.extra || {}),
+    });
+    return { block: true, blockReason: params.message };
+  }
+  recordAdvisory(params.state, {
+    reason: params.reason,
+    message: params.message,
+    severity: params.severity,
+    target: params.target,
+    fastestNextAction: params.fastestNextAction,
+    riskIfIgnored: params.riskIfIgnored,
+  });
+  params.audit.record("tool_advisory", {
+    sessionKey: params.sessionKey,
+    toolName: params.toolName,
+    reason: params.reason,
+    severity: params.severity || "warn",
+    wouldHaveBlockedInStrict: true,
+    toolIntent: params.toolIntent,
+    ...(params.extra || {}),
+  });
+  return undefined;
 }
 
 function closeSession(params: {
@@ -213,6 +273,8 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey);
+    const enforcementMode = getEnforcementMode(api, event);
+    const validationPolicy = getValidationPolicy(api, event);
     const command = getExecCommand(input);
     const mutationBaseDir = getMutationBaseDir(api, ctx);
     const mutatingExec = category === "exec" && isLikelyMutatingExec(command);
@@ -260,39 +322,66 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       }
     }
 
-    if (state.pendingVerification && isMutation) {
+    if (state.pendingVerification && isMutation && validationPolicy !== "off") {
       const blockReason = `Validate the most recent mutation first: ${state.lastMutationLabel || "recent mutation"}`;
       log.info(`[proofrail/P6] block mutation before verification: ${toolIntent}`);
-      recordBlockDecision(state, blockReason, "pending_verification");
-      audit.record("tool_decision", { sessionKey, toolName, reason: "pending_verification", decision: "block", toolIntent });
-      return {
-        block: true,
-        blockReason,
-      };
+      const decision = workflowRiskDecision({
+        state,
+        audit,
+        sessionKey,
+        toolName,
+        toolIntent,
+        reason: "pending_verification",
+        message: blockReason,
+        mode: enforcementMode,
+        severity: state.unverifiedMutationCount >= getMutationBatchMax(api, event) ? "risk" : "warn",
+        target: state.touchedFiles[0],
+        fastestNextAction: "run the narrowest validation or read back the touched target",
+        riskIfIgnored: "More mutations may stack on unverified changes and make recovery harder.",
+      });
+      if (decision) return decision;
     }
 
     if (!relevantEvidence && (mutatingExec || mutationTouchesExistingPath)) {
       const blockReason = "Read nearby code, config, logs, or tests first. Collect local evidence on the same target before mutating existing files or processes.";
       const evidenceSuggestions = suggestEvidence({ toolName, args: input, command, mutatingExec });
       log.info(`[proofrail/P6] block mutation without relevant evidence: ${toolIntent}`);
-      recordBlockDecision(state, blockReason, "missing_evidence");
       mergeEvidenceSuggestions(state, evidenceSuggestions);
-      audit.record("tool_decision", { sessionKey, toolName, reason: "missing_evidence", decision: "block", toolIntent, evidenceSuggestions, targetPaths, evidencePaths: state.evidencePaths });
-      return {
-        block: true,
-        blockReason,
-      };
+      const decision = workflowRiskDecision({
+        state,
+        audit,
+        sessionKey,
+        toolName,
+        toolIntent,
+        reason: "missing_evidence",
+        message: blockReason,
+        mode: enforcementMode,
+        severity: "risk",
+        target: targetPaths[0],
+        fastestNextAction: evidenceSuggestions[0],
+        riskIfIgnored: "The mutation may be based on stale or broad evidence.",
+        extra: { evidenceSuggestions, targetPaths, evidencePaths: state.evidencePaths },
+      });
+      if (decision) return decision;
     }
 
     if (state.consecutiveLowSignal >= getLowSignalBlockThreshold(api, event) && state.lastLowSignalIntent === toolIntent) {
       const blockReason = "Recent tool calls did not produce new facts. Change the path, keywords, log source, host, or validation method before retrying.";
       log.info(`[proofrail/P6] block repeated low-signal probe: ${toolIntent}`);
-      recordBlockDecision(state, blockReason, "low_signal_repeat");
-      audit.record("tool_decision", { sessionKey, toolName, reason: "low_signal_repeat", decision: "block", toolIntent });
-      return {
-        block: true,
-        blockReason,
-      };
+      const decision = workflowRiskDecision({
+        state,
+        audit,
+        sessionKey,
+        toolName,
+        toolIntent,
+        reason: "low_signal_repeat",
+        message: blockReason,
+        mode: enforcementMode,
+        severity: "warn",
+        fastestNextAction: "switch logs, paths, keywords, host, or validation method",
+        riskIfIgnored: "Repeated low-signal probing burns time without improving evidence.",
+      });
+      if (decision) return decision;
     }
 
     if (category === "write") {
@@ -344,9 +433,20 @@ export function registerProofrailHooks(api: ProofrailApi): void {
           const guidance = decision.guidance.map((item) => `- ${item}`).join("\n");
           const blockReason = `Blocked by Proofrail [classifier].\nReason: ${decision.reason}\nEvidence gap: ${decision.evidenceGap}${guidance ? `\nRecommended next step(s):\n${guidance}` : ""}`;
           log.info(`[proofrail/P6] classifier block: ${toolIntent}`);
-          recordBlockDecision(state, blockReason, "llm_classifier");
-          audit.record("tool_decision", { sessionKey, toolName, reason: "llm_classifier", decision: "block", toolIntent });
-          return { block: true, blockReason };
+          const classifierDecision = workflowRiskDecision({
+            state,
+            audit,
+            sessionKey,
+            toolName,
+            toolIntent,
+            reason: "llm_classifier",
+            message: blockReason,
+            mode: enforcementMode,
+            severity: "risk",
+            fastestNextAction: decision.guidance[0],
+            riskIfIgnored: "The classifier found a workflow ambiguity that strict mode would block.",
+          });
+          if (classifierDecision) return classifierDecision;
         }
       }
     }
@@ -384,6 +484,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const sessionKey = getSessionKey(ctx, event);
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey);
+    const validationPolicy = getValidationPolicy(api, event);
     const toolName = getCanonicalToolName(event.toolName, event.tool?.name);
     const input = getInput(event);
     const category = getToolCategory(toolName);
@@ -435,14 +536,16 @@ export function registerProofrailHooks(api: ProofrailApi): void {
       mergeEvidencePaths(state, changedPathHints(toolName, input, command));
       if (!state.pendingVerification) state.phase = "execute";
       clearBlockDecision(state, ["missing_evidence", "low_signal_repeat"]);
+      clearAdvisory(state, ["missing_evidence", "low_signal_repeat"]);
       clearEvidenceSuggestions(state);
     }
 
     if (category === "write" || mutatingExec) {
       if (!blockedResult && toolResultStatus !== "failure") {
-        state.pendingVerification = true;
+        if (validationPolicy !== "off") state.pendingVerification = true;
         state.lastMutationLabel = describeMutation(toolName, input);
         state.mutationCount += 1;
+        state.unverifiedMutationCount += 1;
         state.finalReportRequired = true;
         appendMutationLabel(state, state.lastMutationLabel);
         mergeTouchedFiles(state, touchedPathHints);
@@ -452,11 +555,13 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     } else if (state.pendingVerification && verificationSucceeded) {
       state.pendingVerification = false;
       state.lastMutationLabel = undefined;
+      state.unverifiedMutationCount = 0;
       state.validationCount += 1;
       state.lastValidationLabel = describeObservation(toolName, input, derivedPaths);
       appendValidationLabel(state, state.lastValidationLabel);
       clearValidationSuggestions(state);
       clearBlockDecision(state, ["pending_verification"]);
+      clearAdvisory(state, ["pending_verification", "llm_classifier"]);
       state.phase = state.evidenceCount > 0 ? "execute" : "observe";
     }
 
@@ -486,6 +591,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const sessionKey = getSessionKey(ctx, event);
     const state = getSessionState(sessionStates, sessionKey);
     const compactionState = compactionStates.get(sessionKey);
+    const advisoryInjection = getAdvisoryInjection(api, event);
 
     if (state.phase === "observe") {
       extra += "\n\n## [SYSTEM-ADDED PLUGIN STATE — GENERATED, NOT USER-PROVIDED] Current phase: Observe\nNot enough local evidence has been collected yet. Read code, config, logs, tests, or health probes near the control path before mutating existing files or processes.";
@@ -499,6 +605,15 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     if (state.pendingVerification) {
       extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Validate before continuing\nA file, config, or process mutation just happened (${state.lastMutationLabel || "recent mutation"}). Run the narrowest useful validation next before adding more changes.`;
+    }
+
+    if (state.lastAdvisory && advisoryInjection !== "off" && !state.lastBlockMessage) {
+      const advisory = state.lastAdvisory;
+      extra += `\n\n## [SYSTEM-ADDED PLUGIN ADVISORY — GENERATED, NOT USER-PROVIDED] Proofrail advisory\n- Reason: \`${advisory.reason}\`\n- Severity: \`${advisory.severity}\`\n- Message: ${advisory.message}`;
+      if (advisory.target) extra += `\n- Target: ${advisory.target}`;
+      if (advisory.fastestNextAction) extra += `\n- Fastest valid next action: ${advisory.fastestNextAction}`;
+      if (advisory.riskIfIgnored && advisoryInjection === "full") extra += `\n- Risk if ignored: ${advisory.riskIfIgnored}`;
+      extra += "\n- This is advisory by default; strict mode would have blocked this workflow risk.";
     }
 
     if (state.evidenceSuggestions.length > 0) {

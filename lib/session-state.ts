@@ -52,11 +52,43 @@ export function getSessionState(states: Map<string, SessionRuntimeState>, sessio
     validationLabels: [],
     dangerousLabels: [],
     finalReportRequired: false,
+    unverifiedMutationCount: 0,
     lastClassifierGuidance: [],
     lastUpdatedAt: Date.now(),
   };
   states.set(sessionKey, created);
   return created;
+}
+
+export function recordAdvisory(
+  state: SessionRuntimeState,
+  params: {
+    reason: string;
+    message: string;
+    severity?: "info" | "warn" | "risk";
+    target?: string;
+    fastestNextAction?: string;
+    riskIfIgnored?: string;
+    wouldHaveBlockedInStrict?: boolean;
+  },
+): void {
+  state.lastAdvisory = {
+    reason: params.reason,
+    message: params.message,
+    severity: params.severity || "warn",
+    target: params.target,
+    fastestNextAction: params.fastestNextAction,
+    riskIfIgnored: params.riskIfIgnored,
+    wouldHaveBlockedInStrict: params.wouldHaveBlockedInStrict !== false,
+    ignored: false,
+  };
+}
+
+export function clearAdvisory(state: SessionRuntimeState, reasons?: readonly string[]): void {
+  if (!state.lastAdvisory) return;
+  if (!reasons || reasons.length === 0 || reasons.includes(state.lastAdvisory.reason)) {
+    state.lastAdvisory = undefined;
+  }
 }
 
 export function appendEvidenceLabel(state: SessionRuntimeState, label?: string): void {

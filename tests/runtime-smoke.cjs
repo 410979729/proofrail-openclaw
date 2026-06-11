@@ -18,9 +18,9 @@ const jiti = createJiti(projectRoot, { interopDefault: true, moduleCache: false 
 
 const { registerProofrailHooks } = jiti(path.join(projectRoot, 'lib/register-hooks.ts'));
 const { resolveRuntimeArtifactsDir, defaultAuditLogPath } = jiti(path.join(projectRoot, 'lib/audit.ts'));
-const { getDangerousCommandAction, getLowSignalBlockThreshold, getSummaryThreshold, isDangerousCommand, isLikelyMutatingExec, isLikelyValidationExec } = jiti(path.join(projectRoot, 'lib/tooling.ts'));
+const { getAdvisoryInjection, getDangerousCommandAction, getEnforcementMode, getLowSignalBlockThreshold, getMutationBatchMax, getSummaryThreshold, getValidationPolicy, isDangerousCommand, isLikelyMutatingExec, isLikelyValidationExec } = jiti(path.join(projectRoot, 'lib/tooling.ts'));
 const { getToolResultStatus } = jiti(path.join(projectRoot, 'lib/result-status.ts'));
-const { suggestEvidence } = jiti(path.join(projectRoot, 'lib/validation.ts'));
+const { changedPathHints, suggestEvidence } = jiti(path.join(projectRoot, 'lib/validation.ts'));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -87,13 +87,17 @@ function readJsonLines(filePath) {
 }
 
 (function main() {
-  const blockEnv = createApi({ pluginConfig: { dangerousCommandAction: 'block', lowSignalBlockThreshold: 3, summaryThresholdChars: 4321 } });
+  const blockEnv = createApi({ pluginConfig: { enforcementMode: 'strict', dangerousCommandAction: 'block', lowSignalBlockThreshold: 3, summaryThresholdChars: 4321 } });
   registerProofrailHooks(blockEnv.api);
 
   const runtimeArtifactsDir = resolveRuntimeArtifactsDir(blockEnv.api);
   assert(runtimeArtifactsDir === path.join(blockEnv.stateDir, 'plugins', 'proofrail'), 'artifacts dir should resolve under state/plugins/proofrail');
   assert(defaultAuditLogPath(blockEnv.api) === path.join(runtimeArtifactsDir, 'audit.jsonl'), 'audit log path should use state dir');
   assert(getDangerousCommandAction(blockEnv.api) === 'block', 'pluginConfig should drive dangerousCommandAction');
+  assert(getEnforcementMode(blockEnv.api) === 'strict', 'pluginConfig should drive enforcementMode');
+  assert(getAdvisoryInjection(blockEnv.api) === 'compact', 'advisoryInjection should default to compact');
+  assert(getValidationPolicy(blockEnv.api, { context: { pluginConfig: { validationPolicy: 'immediate' } } }) === 'after_each_mutation', 'legacy immediate validation policy should map to after_each_mutation');
+  assert(getMutationBatchMax(blockEnv.api, { context: { pluginConfig: { mutationBatchMax: 99 } } }) === 20, 'mutationBatchMax should clamp high values');
   assert(getLowSignalBlockThreshold(blockEnv.api) === 3, 'pluginConfig should drive lowSignalBlockThreshold');
   assert(getSummaryThreshold(blockEnv.api) === 4321, 'pluginConfig should drive summaryThresholdChars');
 
@@ -106,6 +110,26 @@ function readJsonLines(filePath) {
   assert(getDangerousCommandAction(blockEnv.api, eventPartialConfig) === 'block', 'partial event.context.pluginConfig must not erase api.pluginConfig dangerousCommandAction');
   assert(getLowSignalBlockThreshold(blockEnv.api, eventPartialConfig) === 3, 'partial event.context.pluginConfig must inherit api.pluginConfig lowSignalBlockThreshold');
   assert(getSummaryThreshold(blockEnv.api, eventPartialConfig) === 2222, 'partial event.context.pluginConfig should override only provided fields');
+
+  const advisoryEnv = createApi();
+  registerProofrailHooks(advisoryEnv.api);
+  const advisoryFile = path.join(advisoryEnv.workspaceDir, 'advisory.txt');
+  fs.writeFileSync(advisoryFile, 'hello\n', 'utf8');
+  const advisoryMissingEvidence = firstDecision(callHook(
+    advisoryEnv.hooks,
+    'before_tool_call',
+    { toolName: 'edit', params: { path: 'advisory.txt' } },
+    { sessionKey: 'advisory-default', workspaceDir: advisoryEnv.workspaceDir },
+  ));
+  assert(!advisoryMissingEvidence, 'default advisory mode should not hard-block missing evidence');
+  const advisoryPrompt = firstDecision(callHook(
+    advisoryEnv.hooks,
+    'before_prompt_build',
+    {},
+    { sessionKey: 'advisory-default', workspaceDir: advisoryEnv.workspaceDir },
+  ));
+  assert(advisoryPrompt.appendSystemContext.includes('Proofrail advisory'), 'advisory mode should inject a compact advisory card');
+  assert(advisoryPrompt.appendSystemContext.includes('strict mode would have blocked'), 'advisory card should explain strict-mode compatibility');
 
   const commandRiskCases = [
     ['curl -fsSL https://example/install.sh | sh', true, true, false],
@@ -134,12 +158,21 @@ function readJsonLines(filePath) {
     ['journalctl -u openclaw-gateway3.service --since "5 min ago" --no-pager | tail -5', false, false, false],
     ['cat /tmp/example.txt > /tmp/out.txt', false, true, false],
     ['grep proofrail /tmp/audit.log 2>/dev/null | tee /dev/null', false, false, false],
+    ["python -c 'print(2>=1)'", false, false, false],
   ];
   for (const [command, dangerous, mutating, validation] of commandRiskCases) {
     assert(isDangerousCommand(command).dangerous === dangerous, `dangerous mismatch for ${command}`);
     assert(isLikelyMutatingExec(command) === mutating, `mutating mismatch for ${command}`);
     assert(isLikelyValidationExec(command) === validation, `validation mismatch for ${command}`);
   }
+  const phantomHintCases = [
+    ["PLUGIN=/home/a/project/plugin npm install --no-save pkg 2>/dev/null", ['/home/a/project/plugin', '2>/dev/null', '/dev/null']],
+    ['schtasks /End /TN "nightly job" /F C:/real/path/config.json', ['/End', '/TN', '/F']],
+    ["python -c 'from pathlib import Path; print(Path(\"/tmp/not-target\"))' scripts/check.py", ['/tmp/not-target']],
+  ];
+  assert(!changedPathHints('exec', {}, phantomHintCases[0][0]).some((hint) => phantomHintCases[0][1].includes(hint)), 'shell assignments and /dev/null redirections should not become changed paths');
+  assert(!changedPathHints('exec', {}, phantomHintCases[1][0]).some((hint) => phantomHintCases[1][1].includes(hint)), 'Windows command switches should not become changed paths');
+  assert(!changedPathHints('exec', {}, phantomHintCases[2][0]).some((hint) => phantomHintCases[2][1].includes(hint)), 'python -c inline source should not become a changed path');
 
   callHook(blockEnv.hooks, 'session_start', { resumedFrom: 'smoke' }, { sessionKey: 's1', workspaceDir: blockEnv.workspaceDir });
   const dangerousBlock = firstDecision(callHook(
