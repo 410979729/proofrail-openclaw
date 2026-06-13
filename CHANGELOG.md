@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.0.5
+
+- Persist and restore pending-verification state across compaction snapshots, including
+  the last mutation label, touched targets, validation suggestions, and advisory state.
+- Treat read-only validation commands such as `pip show`, `npm ls`, `python -m
+  json.tool`, `python -m py_compile`, `Test-Path`, and `Get-Command` as valid
+  post-mutation checks.
+- Add an advisory for mutating exec commands whose concrete target cannot be
+  identified, and audit when agents continue after an advisory.
+- Keep strict batch validation usable by allowing mutations below
+  `mutationBatchMax`, while `after_each_mutation` strict mode still blocks
+  immediately until validation runs.
+
 ## v0.0.4
 
 - Port Hermes v0.0.4-v0.0.8 advisory-first behavior to OpenClaw:

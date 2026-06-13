@@ -1,6 +1,6 @@
 import { LOW_SIGNAL_BLOCK_THRESHOLD, MAX_EVIDENCE_COUNT, NEW_BEHAVIOR_RULES, PLUGIN_VERSION } from "./constants";
 import { AuditLogger, defaultAuditLogPath, resolveRuntimeArtifactsDir } from "./audit";
-import { writeCompactionSnapshot } from "./compaction";
+import { readCompactionSnapshot, writeCompactionSnapshot } from "./compaction";
 import { getPathHints, mutatesExistingPath, pathExistsFromHint, pathHintsOverlap, readbackPathsValidateTouchedPaths } from "./path";
 import {
   appendDangerousLabel,
@@ -17,6 +17,7 @@ import {
   mergeEvidenceSuggestions,
   mergeTouchedFiles,
   mergeValidationSuggestions,
+  markLastAdvisoryIgnored,
   pruneSessionStates,
   recordAdvisory,
   recordBlockDecision,
@@ -102,6 +103,89 @@ function hasRelevantEvidence(
   return pathHintsOverlap(state.evidencePaths, targetPaths, baseDir);
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function shouldHydrateFromSnapshot(state: SessionRuntimeState, snapshot?: CompactionSnapshot): snapshot is CompactionSnapshot {
+  if (!snapshot) return false;
+  if (state.pendingVerification || state.mutationCount > 0 || state.validationCount > 0 || state.evidenceCount > 0) return false;
+  return snapshot.pendingVerification === true || !!snapshot.mutationCount || !!snapshot.validationCount;
+}
+
+function hydrateStateFromCompactionSnapshot(state: SessionRuntimeState, snapshot?: CompactionSnapshot): boolean {
+  if (!shouldHydrateFromSnapshot(state, snapshot)) return false;
+  if (snapshot.phase === "observe" || snapshot.phase === "execute" || snapshot.phase === "review") state.phase = snapshot.phase;
+  state.pendingVerification = snapshot.pendingVerification === true;
+  state.lastMutationLabel = snapshot.lastMutationLabel;
+  state.lastValidatedMutation = snapshot.lastValidatedMutation;
+  state.lastValidationCommand = snapshot.lastValidationCommand;
+  state.mutationCount = typeof snapshot.mutationCount === "number" ? snapshot.mutationCount : state.mutationCount;
+  state.unverifiedMutationCount = typeof snapshot.unverifiedMutationCount === "number" ? snapshot.unverifiedMutationCount : state.unverifiedMutationCount;
+  state.validationCount = typeof snapshot.validationCount === "number" ? snapshot.validationCount : state.validationCount;
+  state.touchedFiles = asStringArray(snapshot.touchedFiles);
+  state.validationSuggestions = asStringArray(snapshot.validationSuggestions);
+  state.lastValidationLabel = snapshot.lastValidationLabel;
+  state.lastBlockMessage = snapshot.lastBlockMessage;
+  state.lastBlockReason = snapshot.lastBlockReason;
+  state.advisoryCount = typeof snapshot.advisoryCount === "number" ? snapshot.advisoryCount : state.advisoryCount;
+  state.ignoredAdvisoryCount = typeof snapshot.ignoredAdvisoryCount === "number" ? snapshot.ignoredAdvisoryCount : state.ignoredAdvisoryCount;
+  state.lastAdvisory = snapshot.lastAdvisory;
+  state.lastUpdatedAt = Date.now();
+  return true;
+}
+
+function restoreCompactionSnapshotIfNeeded(params: {
+  api: ProofrailApi;
+  audit: AuditLogger;
+  compactionStates: Map<string, SessionCompactionState>;
+  sessionKey: string;
+  state: SessionRuntimeState;
+}): void {
+  try {
+    const snapshot = readCompactionSnapshot(params.api, params.sessionKey);
+    if (!hydrateStateFromCompactionSnapshot(params.state, snapshot)) return;
+    const existing = params.compactionStates.get(params.sessionKey);
+    params.compactionStates.set(params.sessionKey, {
+      count: existing?.count || 1,
+      snapshot,
+    });
+    params.audit.record("compaction_state_restored", {
+      sessionKey: params.sessionKey,
+      pendingVerification: params.state.pendingVerification,
+      lastMutationLabel: params.state.lastMutationLabel,
+      mutationCount: params.state.mutationCount,
+      validationCount: params.state.validationCount,
+    });
+  } catch (error) {
+    params.audit.record("compaction_state_restore_failed", { sessionKey: params.sessionKey, error: String(error) });
+  }
+}
+
+function recordIgnoredAdvisory(params: {
+  state: SessionRuntimeState;
+  audit: AuditLogger;
+  sessionKey: string;
+  toolName: string;
+  command?: string;
+  toolIntent: string;
+  reasons: readonly string[];
+}): void {
+  const advisory = markLastAdvisoryIgnored(params.state, params.reasons);
+  if (!advisory) return;
+  params.audit.record("advisory_ignored", {
+    sessionKey: params.sessionKey,
+    reason: advisory.reason,
+    severity: advisory.severity,
+    target: advisory.target,
+    toolName: params.toolName,
+    command: params.command,
+    toolIntent: params.toolIntent,
+  });
+}
+
 function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string): Record<string, unknown> {
   let nextExpected = "observe";
   if (state.pendingVerification) nextExpected = "validation";
@@ -122,6 +206,8 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     dangerousCount: state.dangerousCount,
     lastDangerousLabel: state.lastDangerousLabel,
     lastValidationLabel: state.lastValidationLabel,
+    lastValidatedMutation: state.lastValidatedMutation,
+    lastValidationCommand: state.lastValidationCommand,
     touchedFiles: [...state.touchedFiles],
     evidencePaths: [...state.evidencePaths],
     evidenceSuggestions: [...state.evidenceSuggestions],
@@ -131,6 +217,8 @@ function buildStateExplanation(state: SessionRuntimeState, auditLogPath?: string
     validationLabels: [...state.validationLabels],
     dangerousLabels: [...state.dangerousLabels],
     finalReportRequired: state.finalReportRequired,
+    advisoryCount: state.advisoryCount,
+    ignoredAdvisoryCount: state.ignoredAdvisoryCount,
     lastAdvisory: state.lastAdvisory,
     unverifiedMutationCount: state.unverifiedMutationCount,
     lastBlockMessage: state.lastBlockMessage,
@@ -238,7 +326,8 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const event = getEvent(rawEvent);
     const sessionKey = getSessionKey(ctx, event);
     pruneSessionStates(sessionStates);
-    getSessionState(sessionStates, sessionKey);
+    const state = getSessionState(sessionStates, sessionKey);
+    restoreCompactionSnapshotIfNeeded({ api, audit, compactionStates, sessionKey, state });
     audit.record("session_start", { sessionKey, resumedFrom: event.resumedFrom });
   }, { priority: 30 });
 
@@ -273,6 +362,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey);
+    restoreCompactionSnapshotIfNeeded({ api, audit, compactionStates, sessionKey, state });
     const enforcementMode = getEnforcementMode(api, event);
     const validationPolicy = getValidationPolicy(api, event);
     const command = getExecCommand(input);
@@ -325,6 +415,9 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     if (state.pendingVerification && isMutation && validationPolicy !== "off") {
       const blockReason = `Validate the most recent mutation first: ${state.lastMutationLabel || "recent mutation"}`;
       log.info(`[proofrail/P6] block mutation before verification: ${toolIntent}`);
+      const mutationBatchMax = getMutationBatchMax(api, event);
+      const shouldDeferStrictBlock = validationPolicy === "batch"
+        && state.unverifiedMutationCount < mutationBatchMax;
       const decision = workflowRiskDecision({
         state,
         audit,
@@ -333,11 +426,30 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         toolIntent,
         reason: "pending_verification",
         message: blockReason,
-        mode: enforcementMode,
-        severity: state.unverifiedMutationCount >= getMutationBatchMax(api, event) ? "risk" : "warn",
+        mode: shouldDeferStrictBlock && enforcementMode === "strict" ? "advisory" : enforcementMode,
+        severity: state.unverifiedMutationCount >= mutationBatchMax ? "risk" : "warn",
         target: state.touchedFiles[0],
         fastestNextAction: "run the narrowest validation or read back the touched target",
         riskIfIgnored: "More mutations may stack on unverified changes and make recovery harder.",
+      });
+      if (decision) return decision;
+    }
+
+    if (mutatingExec && targetPaths.length === 0) {
+      const blockReason = "This exec command looks mutating, but Proofrail cannot identify the changed package, process, path, or service target.";
+      const decision = workflowRiskDecision({
+        state,
+        audit,
+        sessionKey,
+        toolName,
+        toolIntent,
+        reason: "unknown_target_mutation",
+        message: blockReason,
+        mode: enforcementMode,
+        severity: "risk",
+        target: command.slice(0, 160),
+        fastestNextAction: "identify the package, process, path, or service this command changes before continuing",
+        riskIfIgnored: "A mutating command with no concrete target is harder to audit, validate, or recover after compaction.",
       });
       if (decision) return decision;
     }
@@ -484,6 +596,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     const sessionKey = getSessionKey(ctx, event);
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey);
+    restoreCompactionSnapshotIfNeeded({ api, audit, compactionStates, sessionKey, state });
     const validationPolicy = getValidationPolicy(api, event);
     const toolName = getCanonicalToolName(event.toolName, event.tool?.name);
     const input = getInput(event);
@@ -542,6 +655,15 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     if (category === "write" || mutatingExec) {
       if (!blockedResult && toolResultStatus !== "failure") {
+        recordIgnoredAdvisory({
+          state,
+          audit,
+          sessionKey,
+          toolName,
+          command,
+          toolIntent,
+          reasons: ["missing_evidence", "pending_verification", "unknown_target_mutation", "low_signal_repeat", "llm_classifier"],
+        });
         if (validationPolicy !== "off") state.pendingVerification = true;
         state.lastMutationLabel = describeMutation(toolName, input);
         state.mutationCount += 1;
@@ -553,6 +675,8 @@ export function registerProofrailHooks(api: ProofrailApi): void {
         state.phase = "review";
       }
     } else if (state.pendingVerification && verificationSucceeded) {
+      state.lastValidatedMutation = state.lastMutationLabel;
+      state.lastValidationCommand = command || toolIntent;
       state.pendingVerification = false;
       state.lastMutationLabel = undefined;
       state.unverifiedMutationCount = 0;
@@ -590,6 +714,7 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     let extra = NEW_BEHAVIOR_RULES;
     const sessionKey = getSessionKey(ctx, event);
     const state = getSessionState(sessionStates, sessionKey);
+    restoreCompactionSnapshotIfNeeded({ api, audit, compactionStates, sessionKey, state });
     const compactionState = compactionStates.get(sessionKey);
     const advisoryInjection = getAdvisoryInjection(api, event);
 
@@ -664,6 +789,9 @@ export function registerProofrailHooks(api: ProofrailApi): void {
 
     if (compactionState?.snapshot && compactionState.count > 0) {
       extra += `\n\n## [SYSTEM-ADDED PLUGIN REMINDER — GENERATED, NOT USER-PROVIDED] ⚠️ Compaction reminder\nThe context was just compacted for the ${compactionState.count} time (${compactionState.snapshot.timestamp}). Please keep in mind:\n- do not lose track of the active task\n- continue following all behavior rules\n- if context feels incomplete, proactively confirm with the user`;
+      if (compactionState.snapshot.pendingVerification) {
+        extra += `\n- snapshot pending verification: ${compactionState.snapshot.lastMutationLabel || "recent mutation"}\n- valid next step: run the narrowest validation or read back the touched target before adding more mutations`;
+      }
     }
 
     return { appendSystemContext: extra };
@@ -672,11 +800,28 @@ export function registerProofrailHooks(api: ProofrailApi): void {
   api.on("before_compaction", (rawEvent, ctx) => {
     const event = getEvent(rawEvent);
     const sessionKey = getSessionKey(ctx, event);
+    const state = getSessionState(sessionStates, sessionKey);
     const snapshot: CompactionSnapshot = {
       timestamp: new Date().toISOString(),
       messageCount: event.messageCount || 0,
       tokenCount: event.tokenCount,
       sessionKey,
+      phase: state.phase,
+      pendingVerification: state.pendingVerification,
+      lastMutationLabel: state.lastMutationLabel,
+      lastValidatedMutation: state.lastValidatedMutation,
+      lastValidationCommand: state.lastValidationCommand,
+      mutationCount: state.mutationCount,
+      unverifiedMutationCount: state.unverifiedMutationCount,
+      validationCount: state.validationCount,
+      touchedFiles: state.touchedFiles,
+      validationSuggestions: state.validationSuggestions,
+      lastValidationLabel: state.lastValidationLabel,
+      lastBlockMessage: state.lastBlockMessage,
+      lastBlockReason: state.lastBlockReason,
+      advisoryCount: state.advisoryCount,
+      ignoredAdvisoryCount: state.ignoredAdvisoryCount,
+      lastAdvisory: state.lastAdvisory,
     };
 
     const existingCompactionState = compactionStates.get(sessionKey);
@@ -686,7 +831,14 @@ export function registerProofrailHooks(api: ProofrailApi): void {
     });
 
     log.info(`[proofrail/compact] before_compaction: ${event.messageCount} msgs, ${event.tokenCount || "?"} tokens`);
-    audit.record("before_compaction", { sessionKey, messageCount: event.messageCount, tokenCount: event.tokenCount });
+    audit.record("before_compaction", {
+      sessionKey,
+      messageCount: event.messageCount,
+      tokenCount: event.tokenCount,
+      pendingVerification: state.pendingVerification,
+      lastMutationLabel: state.lastMutationLabel,
+      unverifiedMutationCount: state.unverifiedMutationCount,
+    });
 
     try {
       writeCompactionSnapshot(api, snapshot);
@@ -718,9 +870,13 @@ export function registerProofrailHooks(api: ProofrailApi): void {
   }).explainState = (sessionKey: string) => {
     pruneSessionStates(sessionStates);
     const state = getSessionState(sessionStates, sessionKey || "default");
+    restoreCompactionSnapshotIfNeeded({ api, audit, compactionStates, sessionKey: sessionKey || "default", state });
     return {
       ...buildStateExplanation(state, auditLogPath),
       artifactsDir: resolveRuntimeArtifactsDir(api),
+      enforcementMode: getEnforcementMode(api),
+      validationPolicy: getValidationPolicy(api),
+      mutationBatchMax: getMutationBatchMax(api),
     };
   };
 

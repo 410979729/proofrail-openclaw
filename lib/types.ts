@@ -31,6 +31,8 @@ export interface SessionRuntimeState {
   dangerousCount: number;
   lastDangerousLabel?: string;
   lastValidationLabel?: string;
+  lastValidatedMutation?: string;
+  lastValidationCommand?: string;
   touchedFiles: readonly string[];
   evidencePaths: readonly string[];
   evidenceSuggestions: readonly string[];
@@ -40,6 +42,8 @@ export interface SessionRuntimeState {
   validationLabels: readonly string[];
   dangerousLabels: readonly string[];
   finalReportRequired: boolean;
+  advisoryCount: number;
+  ignoredAdvisoryCount: number;
   lastAdvisory?: {
     reason: string;
     message: string;
@@ -66,6 +70,22 @@ export interface CompactionSnapshot {
   messageCount: number;
   tokenCount?: number;
   sessionKey?: string;
+  phase?: SessionPhase;
+  pendingVerification?: boolean;
+  lastMutationLabel?: string;
+  lastValidatedMutation?: string;
+  lastValidationCommand?: string;
+  mutationCount?: number;
+  unverifiedMutationCount?: number;
+  validationCount?: number;
+  touchedFiles?: readonly string[];
+  validationSuggestions?: readonly string[];
+  lastValidationLabel?: string;
+  lastBlockMessage?: string;
+  lastBlockReason?: string;
+  advisoryCount?: number;
+  ignoredAdvisoryCount?: number;
+  lastAdvisory?: SessionRuntimeState["lastAdvisory"];
 }
 
 export interface ProofrailLogger {

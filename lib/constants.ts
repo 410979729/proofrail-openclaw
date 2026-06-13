@@ -15,7 +15,7 @@ export const DANGEROUS_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\bsystemctl\s+(stop|disable)\s+tailscaled\b/, label: "stop tailscaled" },
 ];
 
-export const PLUGIN_VERSION = "0.0.4";
+export const PLUGIN_VERSION = "0.0.5";
 export const DEFAULT_ENFORCEMENT_MODE = "advisory" as const;
 export const DEFAULT_ADVISORY_INJECTION = "compact" as const;
 export const DEFAULT_VALIDATION_POLICY = "batch" as const;
@@ -126,6 +126,11 @@ export const MUTATING_EXEC_PATTERNS: RegExp[] = [
 export const VALIDATION_EXEC_PATTERNS: RegExp[] = [
   /\b(pytest|jest|vitest|mocha|rspec|phpunit|cargo test|go test)\b/i,
   /\b(npm|pnpm|yarn|bun)\s+(test|run\s+(test|lint|build|typecheck))\b/i,
+  /\b(npm|pnpm|yarn|bun)\s+(ls|list)\b/i,
+  /\b(pip|pip3)\s+show\b/i,
+  /\bpython(?:3)?\s+-m\s+(json\.tool|py_compile)\b/i,
+  /\bpy\s+-m\s+(json\.tool|py_compile)\b/i,
+  /\b(Test-Path|Get-Command|Get-Item)\b/i,
   /\b(tsc|eslint|ruff|mypy|cargo check|go test)\b/i,
   /\b(systemctl\s+status)\b/i,
   /\b(ss|netstat|lsof)\b/i,

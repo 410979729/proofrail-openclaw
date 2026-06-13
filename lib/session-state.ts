@@ -52,6 +52,8 @@ export function getSessionState(states: Map<string, SessionRuntimeState>, sessio
     validationLabels: [],
     dangerousLabels: [],
     finalReportRequired: false,
+    advisoryCount: 0,
+    ignoredAdvisoryCount: 0,
     unverifiedMutationCount: 0,
     lastClassifierGuidance: [],
     lastUpdatedAt: Date.now(),
@@ -72,6 +74,7 @@ export function recordAdvisory(
     wouldHaveBlockedInStrict?: boolean;
   },
 ): void {
+  state.advisoryCount = (state.advisoryCount || 0) + 1;
   state.lastAdvisory = {
     reason: params.reason,
     message: params.message,
@@ -89,6 +92,18 @@ export function clearAdvisory(state: SessionRuntimeState, reasons?: readonly str
   if (!reasons || reasons.length === 0 || reasons.includes(state.lastAdvisory.reason)) {
     state.lastAdvisory = undefined;
   }
+}
+
+export function markLastAdvisoryIgnored(
+  state: SessionRuntimeState,
+  reasons?: readonly string[],
+): SessionRuntimeState["lastAdvisory"] {
+  const advisory = state.lastAdvisory;
+  if (!advisory || advisory.ignored) return undefined;
+  if (reasons && reasons.length > 0 && !reasons.includes(advisory.reason)) return undefined;
+  state.lastAdvisory = { ...advisory, ignored: true };
+  state.ignoredAdvisoryCount = (state.ignoredAdvisoryCount || 0) + 1;
+  return state.lastAdvisory;
 }
 
 export function appendEvidenceLabel(state: SessionRuntimeState, label?: string): void {

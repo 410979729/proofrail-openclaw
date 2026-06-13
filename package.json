@@ -1,6 +1,6 @@
 {
   "name": "proofrail-openclaw",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": false,
   "description": "Proofrail for OpenClaw: execution harness, runtime guardrails, evidence-first changes, and verification gates for OpenClaw agents.",
   "type": "module",
