@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "declaration": false,
+    "sourceMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "openclaw/plugin-sdk/plugin-entry": [
+        "node_modules/openclaw/dist/plugin-sdk/plugin-entry.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "index.ts",
+    "lib/**/*.ts"
+  ]
+}

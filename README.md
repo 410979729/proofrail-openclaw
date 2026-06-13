@@ -26,14 +26,15 @@ This is what turns “just answer” behavior into “inspect, act, verify, reco
 
 ## Release Status
 
-This tree is prepared for release: `v0.0.5`.
+This tree is prepared for release: `v0.0.6`.
 
-Notable `v0.0.5` scope includes:
+Notable `v0.0.6` scope includes:
 
 - pending-verification state survives compaction snapshots and is restored when a session resumes
 - read-only validation commands now include `pip show`, `npm ls`, `python -m json.tool`, `python -m py_compile`, `Test-Path`, and `Get-Command`
 - unknown-target mutating exec commands record an advisory, and ignored advisories are written to the audit log
 - `strict` + `batch` validation allows mutations below `mutationBatchMax`; `after_each_mutation` remains fail-closed
+- compiled `dist/` runtime output is included for ClawHub and OpenClaw package loading
 
 The current scope is intentionally OpenClaw-first:
 
@@ -85,7 +86,7 @@ From a packed tarball:
 
 ```bash
 npm pack
-openclaw plugins install npm-pack:./proofrail-openclaw-0.0.5.tgz
+openclaw plugins install npm-pack:./proofrail-openclaw-0.0.6.tgz
 ```
 
 After install, enable the plugin if needed and restart the serving Gateway before expecting hook behavior to change.

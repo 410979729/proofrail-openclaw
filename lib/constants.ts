@@ -15,7 +15,7 @@ export const DANGEROUS_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\bsystemctl\s+(stop|disable)\s+tailscaled\b/, label: "stop tailscaled" },
 ];
 
-export const PLUGIN_VERSION = "0.0.5";
+export const PLUGIN_VERSION = "0.0.6";
 export const DEFAULT_ENFORCEMENT_MODE = "advisory" as const;
 export const DEFAULT_ADVISORY_INJECTION = "compact" as const;
 export const DEFAULT_VALIDATION_POLICY = "batch" as const;

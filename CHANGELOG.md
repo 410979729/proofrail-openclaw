@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.6
+
+- Add compiled `dist/` runtime output and point OpenClaw package metadata at
+  `./dist/index.js` so ClawHub can publish and verify the plugin bundle.
+- Includes the v0.0.5 issue #1 fixes for compaction-state restore,
+  read-only validation command recognition, unknown-target mutation advisories,
+  ignored-advisory audit rows, and strict batch validation semantics.
+
 ## v0.0.5
 
 - Persist and restore pending-verification state across compaction snapshots, including

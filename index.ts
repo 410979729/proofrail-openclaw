@@ -8,7 +8,7 @@ export default definePluginEntry({
   name: "Proofrail for OpenClaw",
   description: "Execution harness and runtime guardrails for OpenClaw agents with evidence-first changes and verification gates.",
 
-  register(api: ProofrailApi) {
-    registerProofrailHooks(api);
+  register(api) {
+    registerProofrailHooks(api as ProofrailApi);
   },
 });
